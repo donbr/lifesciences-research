@@ -1,0 +1,15 @@
+{
+  "$schema": "https://gofastmcp.com/public/schemas/fastmcp.json/v1.json",
+  "source": {
+    "path": "src/lifesciences_mcp/servers/gateway.py",
+    "entrypoint": "mcp"
+  },
+  "environment": {
+    "python": ">=3.11",
+    "project": "."
+  },
+  "deployment": {
+    "transport": "http",
+    "log_level": "INFO"
+  }
+}

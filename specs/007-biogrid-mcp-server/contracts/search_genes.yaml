@@ -1,0 +1,132 @@
+# Tool Contract: search_genes
+
+tool_name: search_genes
+phase: fuzzy
+protocol: Gene Symbol Validation (simplified Fuzzy-to-Fact Phase 1)
+
+description: |
+  Validate a gene symbol for BioGRID interaction queries.
+  BioGRID uses gene symbols directly (not CURIEs), so this tool validates
+  the symbol format and normalizes to uppercase before querying.
+
+inputs:
+  query:
+    type: string
+    required: true
+    min_length: 2
+    description: |
+      Gene symbol to validate (case-insensitive).
+      Examples: "TP53", "BRCA1", "tp53" (normalized to "TP53")
+    validation: |
+      Must match pattern: ^[A-Za-z0-9][A-Za-z0-9\-]{0,14}$
+      Will be normalized to uppercase by client
+    examples:
+      - "TP53"
+      - "BRCA1"
+      - "HLA-A"
+
+  organism:
+    type: integer
+    required: false
+    default: 9606
+    description: NCBI Taxonomy ID filter
+    examples:
+      - 9606  # Homo sapiens
+      - 10090 # Mus musculus
+      - 7227  # Drosophila melanogaster
+
+output:
+  envelope: PaginationEnvelope
+  content_type: BioGridSearchCandidate
+  description: Single validated gene symbol
+  example:
+    items:
+      - symbol: "TP53"
+        organism: "Homo sapiens"
+        taxon_id: 9606
+        is_valid: true
+    pagination:
+      cursor: null
+      total_count: 1
+      page_size: 1
+
+errors:
+  AMBIGUOUS_QUERY:
+    http_status: 400
+    message: "Query must be at least 2 characters"
+    recovery_hint: "Provide a more specific gene symbol (minimum 2 characters)"
+    trigger: len(query) < 2
+    example_invalid_input: "A"
+
+  UPSTREAM_ERROR:
+    http_status: 502
+    message: "BioGRID API error: {details}"
+    recovery_hint: "Check BIOGRID_API_KEY is valid. Get free key at https://webservice.thebiogrid.org/"
+    trigger: BioGRID API returns error (missing/invalid API key, 500, timeout)
+    example_invalid_input: ""
+
+  RATE_LIMITED:
+    http_status: 429
+    message: "Rate limit exceeded"
+    recovery_hint: "Wait 1 second before retrying. Rate limit: 2 req/sec"
+    trigger: Client-side rate limiting or HTTP 429 from BioGRID
+    example_invalid_input: ""
+
+examples:
+  - name: Validate human TP53
+    input:
+      query: "TP53"
+      organism: 9606
+    output:
+      items:
+        - symbol: "TP53"
+          organism: "Homo sapiens"
+          taxon_id: 9606
+          is_valid: true
+      pagination:
+        cursor: null
+        total_count: 1
+        page_size: 1
+
+  - name: Validate with case normalization
+    input:
+      query: "tp53"
+      organism: 9606
+    output:
+      items:
+        - symbol: "TP53"
+          organism: "Homo sapiens"
+          taxon_id: 9606
+          is_valid: true
+      pagination:
+        cursor: null
+        total_count: 1
+        page_size: 1
+
+  - name: Validate gene with hyphen
+    input:
+      query: "HLA-A"
+      organism: 9606
+    output:
+      items:
+        - symbol: "HLA-A"
+          organism: "Homo sapiens"
+          taxon_id: 9606
+          is_valid: true
+      pagination:
+        cursor: null
+        total_count: 1
+        page_size: 1
+
+usage_notes:
+  - Gene symbols are case-insensitive; normalized to uppercase by client
+  - Validation checks format (alphanumeric + hyphen, 1-15 chars)
+  - BioGRID accepts gene symbols directly without CURIE resolution
+  - This is a simplified Fuzzy-to-Fact workflow adapted to BioGRID's API design
+  - Always validate symbol before calling get_interactions
+
+adr_compliance:
+  - "Simplified Fuzzy-to-Fact: Gene symbol validation → interaction query"
+  - "PaginationEnvelope wrapper (ADR-001 §8)"
+  - "ErrorEnvelope for all errors (ADR-001 §8)"
+  - "Client-side validation prevents invalid API calls"
