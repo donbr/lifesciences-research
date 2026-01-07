@@ -2,1248 +2,1738 @@
 
 ## Overview
 
-The Life Sciences MCP system implements a sophisticated data flow architecture built around the **Fuzzy-to-Fact protocol**. This architectural pattern enforces a two-phase resolution process:
+The Life Sciences MCP system implements a sophisticated multi-tier architecture for querying biological databases through the Model Context Protocol. The system is built around several key patterns:
 
-1. **Phase 1 (Fuzzy)**: Search operations return ranked candidates with relevance scores
-2. **Phase 2 (Fact)**: Strict lookup operations require validated CURIEs for precision retrieval
+1. **Fuzzy-to-Fact Protocol**: A 2-phase pattern where fuzzy search returns ranked candidates, followed by strict CURIE-based lookup
+2. **Rate-Limited Client Pattern**: Async HTTP clients with connection pooling, rate limiting, and exponential backoff
+3. **Error Recovery Pattern**: Structured errors with actionable recovery hints for autonomous agent self-correction
+4. **Gateway Composition**: Multiple MCP servers composed into a unified gateway without proxy overhead
+5. **Cross-Database Navigation**: Entities with cross-references enabling multi-database traversal
 
-All data flows are wrapped in canonical envelope models (`PaginationEnvelope`, `ErrorEnvelope`) that provide:
-- Consistent error handling with recovery hints
-- Pagination metadata for large result sets
-- Cross-reference identifiers enabling entity triangulation across 13+ databases
+The codebase consists of 12 operational MCP servers (HGNC, UniProt, ChEMBL, Open Targets, STRING, BioGRID, Ensembl, Entrez, PubChem, IUPHAR/GtoPdb, WikiPathways, ClinicalTrials.gov) organized into:
+- **13 Client implementations** (src/lifesciences_mcp/clients/)
+- **13 Server implementations** (src/lifesciences_mcp/servers/)
+- **20+ Data models** (src/lifesciences_mcp/models/)
+- **1 Aggregator** (src/lifesciences_agent/aggregator.py)
+- **1 Gateway** (src/lifesciences_mcp/servers/gateway.py)
 
-The system uses a **gateway server pattern** where 12 individual MCP servers are composed into a unified interface with tool name prefixing. All communication is asynchronous with rate limiting, connection pooling, and exponential backoff for resilience.
+## 1. Fuzzy-to-Fact Protocol Flow
 
----
-
-## 1. Simple Query Flow
-
-**Scenario:** AI agent looks up a gene by symbol (e.g., "BRCA1") through the HGNC server
-
-### Sequence Diagram
+The Fuzzy-to-Fact protocol is the cornerstone pattern used across all 12 servers. It enforces a 2-phase workflow to prevent agents from using ambiguous identifiers.
 
 ```mermaid
 sequenceDiagram
-    participant Agent as AI Agent
-    participant Gateway as Gateway Server<br/>(gateway.py)
-    participant Server as HGNC Server<br/>(hgnc.py)
-    participant Client as HGNC Client<br/>(clients/hgnc.py)
-    participant API as HGNC REST API<br/>(rest.genenames.org)
+    participant Agent
+    participant MCPServer as MCP Server<br/>(e.g., hgnc.py)
+    participant Client as API Client<br/>(e.g., HGNCClient)
+    participant API as External API<br/>(e.g., HGNC REST)
 
-    %% Phase 1: Fuzzy Search
-    Note over Agent,API: Phase 1: Fuzzy Search (Candidate Resolution)
+    Note over Agent,API: Phase 1: Fuzzy Search (returns ranked candidates)
 
-    Agent->>+Gateway: hgnc_search_genes(query="BRCA1")
-    Note right of Gateway: FastMCP routes to<br/>mounted server by prefix
-    Gateway->>+Server: search_genes(query="BRCA1")
-    Server->>+Server: get_client()
-    Note right of Server: Lazy init singleton<br/>HGNCClient instance
-    Server->>+Client: search_genes(query="BRCA1",<br/>page_size=50)
+    Agent->>MCPServer: search_genes(query="p53", page_size=50)
+    activate MCPServer
+    MCPServer->>Client: await client.search_genes(...)
+    activate Client
 
-    %% Client validates query
-    Client->>Client: Validate query length >= 2
+    Note over Client: Validate query length >= 2 chars
 
-    %% Rate limiting
-    Client->>+Client: _rate_limited_get("/search/BRCA1")
-    Note right of Client: Acquire lock for<br/>rate limiting
-    Client->>Client: Check elapsed time since<br/>last request > 100ms
+    Client->>API: GET /search/alias_symbol/p53
+    activate API
+    API-->>Client: [{"hgnc_id": "11998", "symbol": "TP53"}]
+    deactivate API
 
-    %% First API call: alias search
-    Client->>+API: GET /search/alias_symbol/BRCA1
-    API-->>-Client: 200 OK {docs: [...]}
-    Note right of Client: Extract HGNC IDs<br/>from alias matches
+    Client->>API: GET /search/p53
+    activate API
+    API-->>Client: {"docs": [...], "numFound": 5}
+    deactivate API
 
-    %% Second API call: general search
-    Client->>+API: GET /search/BRCA1
-    API-->>-Client: 200 OK {response: {docs: [...],<br/>numFound: 5}}
+    Note over Client: Merge results with alias boost<br/>TP53 score=1.0 (exact alias)<br/>Other matches score=0.95-0.1
 
-    %% Score calculation
-    Client->>Client: Build SearchCandidate list:<br/>1. Alias matches (score=1.0)<br/>2. Exact symbol matches (score=1.0)<br/>3. Position-based scores<br/>(0.95 - index*0.05)
-    Client->>Client: Sort by score descending
-    Client->>Client: Apply pagination (offset=0, limit=50)
-    Client->>Client: Encode next cursor if needed
+    Client-->>MCPServer: PaginationEnvelope[SearchCandidate]<br/>{items: [<br/>  {id:"HGNC:11998", symbol:"TP53", score:1.0},<br/>  {id:"HGNC:12345", symbol:"TP53AP1", score:0.95}<br/>], cursor: "...", total_count: 5}
+    deactivate Client
+    MCPServer-->>Agent: PaginationEnvelope
+    deactivate MCPServer
 
-    %% Return envelope
-    Client-->>-Server: PaginationEnvelope<br/>{items: [SearchCandidate],<br/>pagination: {...}}
-    Server-->>-Gateway: PaginationEnvelope
-    Gateway-->>-Agent: PaginationEnvelope
+    Note over Agent,API: Phase 2: Strict Lookup (requires CURIE from Phase 1)
 
-    Note over Agent: Agent selects top candidate<br/>HGNC:1100 (score: 1.0)
+    Agent->>MCPServer: get_gene(hgnc_id="HGNC:11998")
+    activate MCPServer
+    MCPServer->>Client: await client.get_gene(hgnc_id)
+    activate Client
 
-    %% Phase 2: Strict Lookup
-    Note over Agent,API: Phase 2: Strict Lookup (Fact Retrieval)
+    Note over Client: Validate CURIE format<br/>Pattern: ^HGNC:\d+$
 
-    Agent->>+Gateway: hgnc_get_gene(hgnc_id="HGNC:1100")
-    Gateway->>+Server: get_gene(hgnc_id="HGNC:1100")
-    Server->>+Client: get_gene(hgnc_id="HGNC:1100")
+    Client->>API: GET /fetch/hgnc_id/11998
+    activate API
+    API-->>Client: {"docs": [{"hgnc_id": "11998", "symbol": "TP53", ...}]}
+    deactivate API
 
-    %% CURIE validation
-    Client->>Client: Validate CURIE format<br/>against ^HGNC:\d+$
-    Note right of Client: Extract numeric ID: "1100"
+    Note over Client: Build cross-references<br/>ensembl_gene, uniprot, entrez, etc.
 
-    %% API call
-    Client->>+Client: _rate_limited_get("/fetch/hgnc_id/1100")
-    Client->>Client: Rate limit check
-    Client->>+API: GET /fetch/hgnc_id/1100
-    API-->>-Client: 200 OK {response: {docs: [...]}}
-
-    %% Build cross-references
-    Client->>Client: _build_cross_references()
-    Note right of Client: Map API fields to<br/>CrossReferences model:<br/>- ensembl_gene<br/>- uniprot (list)<br/>- entrez<br/>- refseq (list)<br/>- omim
-
-    %% Construct Gene model
-    Client->>Client: Construct Gene model with:<br/>id, symbol, name, status,<br/>locus_type, location,<br/>alias_symbols, cross_references
-
-    Client-->>-Server: Gene model
-    Server-->>-Gateway: Gene model
-    Gateway-->>-Agent: Gene model
+    Client-->>MCPServer: Gene<br/>{id:"HGNC:11998", symbol:"TP53",<br/> cross_references: {<br/>   ensembl_gene: "ENSG00000141510",<br/>   uniprot: ["P04637"],<br/>   entrez: "7157"<br/> }}
+    deactivate Client
+    MCPServer-->>Agent: Gene
+    deactivate MCPServer
 ```
 
 ### Explanation
 
-This flow demonstrates the **Fuzzy-to-Fact protocol** in action:
+**Phase 1: Fuzzy Search (search_genes/search_proteins/search_compounds)**
 
-**Phase 1: Fuzzy Search (lines 11-48)**
-1. The AI agent calls `hgnc_search_genes` through the gateway server
-2. Gateway server routes the request to the HGNC server based on the `hgnc_` prefix (gateway.py:52-54)
-3. HGNC server retrieves the singleton client instance using lazy initialization (hgnc.py:28-33)
-4. Client validates query length minimum 2 characters (clients/hgnc.py:136-137)
-5. Client performs **two parallel searches** with alias boosting:
-   - First: `/search/alias_symbol/{query}` to find exact alias matches (lines 155-171)
-   - Second: `/search/{query}` for general symbol/name matches (line 159)
-6. **Rate limiting** enforces 10 req/s using a lock with thundering herd prevention (lines 75-108)
-7. Client builds ranked candidates with score calculation:
-   - Alias matches get perfect score (1.0)
-   - Exact symbol matches get perfect score (1.0)
-   - Other results use position-based scoring: `max(0.1, 0.95 - index * 0.05)`
-8. Results are sorted by score descending and wrapped in `PaginationEnvelope`
-9. Pagination cursor is base64-encoded JSON containing offset (lines 240-241)
+Entry point: MCP server tool decorated with `@mcp.tool` (e.g., `/src/lifesciences_mcp/servers/hgnc.py:36-64`)
 
-**Phase 2: Strict Lookup (lines 52-85)**
-10. Agent selects the top candidate and calls `hgnc_get_gene` with the CURIE
-11. Client validates CURIE format using regex `^HGNC:\d+$` (clients/hgnc.py:283-284)
-12. If invalid, returns `ErrorEnvelope.unresolved_entity()` with recovery hint
-13. Client extracts numeric ID and fetches from `/fetch/hgnc_id/{id}` endpoint
-14. Cross-references are mapped from HGNC response fields to the 22-key registry (lines 333-344)
-15. Complete `Gene` model is returned with all metadata and cross-references
+1. **Input Validation**: Client validates query length (min 2 chars) and clamps page_size (1-100)
+2. **Alias Boosting** (HGNC-specific): Searches alias_symbol field first for exact matches (`/src/lifesciences_mcp/clients/hgnc.py:154-156`)
+   - Example: "p53" → TP53 gets score=1.0
+3. **General Search**: Queries main search endpoint for symbol/name matches (`/src/lifesciences_mcp/clients/hgnc.py:159`)
+4. **Score Calculation**:
+   - Exact symbol match: score=1.0
+   - Alias match: score=1.0
+   - Position-based: score=0.95 - (position * 0.05), min 0.1 (`/src/lifesciences_mcp/clients/hgnc.py:217`)
+5. **Result Merging**: Combines alias and general results, deduplicates, sorts by score descending
+6. **Pagination**: Client-side slicing (HGNC API doesn't support server-side pagination) (`/src/lifesciences_mcp/clients/hgnc.py:233-241`)
+7. **Cursor Encoding**: Base64-encoded JSON with offset for next page (`/src/lifesciences_mcp/clients/hgnc.py:240-241`)
 
-**Key Design Patterns:**
-- **Singleton pattern**: Client instances are module-level globals to enable connection pooling
-- **Rate limiting with lock**: Prevents concurrent requests from violating API limits
-- **Omit-if-null**: Cross-references only include keys with values (never null/empty)
-- **CURIE validation**: Strict format enforcement prevents ambiguous queries reaching backend
+**Phase 2: Strict Lookup (get_gene/get_protein/get_compound)**
 
-### Key Code References
+Entry point: MCP server tool decorated with `@mcp.tool` (e.g., `/src/lifesciences_mcp/servers/hgnc.py:67-81`)
 
-- **Gateway routing**: `src/lifesciences_mcp/servers/gateway.py` (lines 52-54) - mcp.mount() with prefix and tool name mapping
-- **Server tool decorator**: `src/lifesciences_mcp/servers/hgnc.py` (lines 36-64) - @mcp.tool annotation exposes search_genes
-- **Client rate limiting**: `src/lifesciences_mcp/clients/hgnc.py` (lines 62-108) - _rate_limited_get() with thundering herd prevention
-- **Alias boosting**: `src/lifesciences_mcp/clients/hgnc.py` (lines 154-156, 185-198) - Two-stage search with perfect scores for aliases
-- **Score calculation**: `src/lifesciences_mcp/clients/hgnc.py` (lines 200-227) - Position-based decay with exact match detection
-- **CURIE validation**: `src/lifesciences_mcp/clients/hgnc.py` (lines 283-284) - Regex pattern matching with ErrorEnvelope on failure
-- **Cross-reference mapping**: `src/lifesciences_mcp/clients/hgnc.py` (lines 333-344) - _build_cross_references() using 22-key registry
-- **Envelope models**: `src/lifesciences_mcp/models/envelopes.py` (lines 119-144) - PaginationEnvelope and ErrorEnvelope definitions
+1. **CURIE Validation**: Enforces strict format (e.g., `HGNC:\d+`, `UniProtKB:[A-Z0-9]+`) (`/src/lifesciences_mcp/clients/hgnc.py:283-284`)
+   - Invalid format → UNRESOLVED_ENTITY error with recovery hint
+2. **API Fetch**: Extracts numeric ID, fetches from API (`/src/lifesciences_mcp/clients/hgnc.py:290`)
+3. **Cross-Reference Building**: Maps API fields to 22-key registry (`/src/lifesciences_mcp/clients/hgnc.py:333-344`)
+   - Keys: ensembl_gene, uniprot, entrez, refseq, omim, chembl, drugbank, etc.
+   - Omit-if-null pattern: keys with no value are excluded from response
+4. **Complete Entity**: Returns full entity with all available metadata and cross-references
 
----
+**Key Components:**
+- Models: `/src/lifesciences_mcp/models/gene.py` (Gene, SearchCandidate, CrossReferences)
+- Envelopes: `/src/lifesciences_mcp/models/envelopes.py` (PaginationEnvelope, ErrorEnvelope)
+- Client: `/src/lifesciences_mcp/clients/hgnc.py` (HGNCClient)
+- Server: `/src/lifesciences_mcp/servers/hgnc.py` (FastMCP server with 2 tools)
 
-## 2. Interactive Client Session Flow
+**Error Handling:**
+- Query too short (< 2 chars) → AMBIGUOUS_QUERY
+- Too many results (> 100) with short query → AMBIGUOUS_QUERY
+- Invalid CURIE format → UNRESOLVED_ENTITY (with hint to use search first)
+- Valid CURIE but not found → ENTITY_NOT_FOUND
+- Rate limit exceeded → RATE_LIMITED (with retry-after hint)
+- Upstream API error → UPSTREAM_ERROR
 
-**Scenario:** Multi-step workflow where agent searches for a gene, then triangulates to find its protein, then looks up compound interactions
+## 2. Rate-Limited API Client Flow
 
-### Sequence Diagram
+All clients inherit from `LifeSciencesClient` base class and implement rate limiting to respect upstream API constraints. This flow shows the sophisticated rate limiting with thundering herd prevention.
 
 ```mermaid
 sequenceDiagram
-    participant Agent as AI Agent
-    participant Gateway as Gateway Server
-    participant HGNC_S as HGNC Server
-    participant HGNC_C as HGNC Client
-    participant UniProt_S as UniProt Server
-    participant UniProt_C as UniProt Client
-    participant ChEMBL_S as ChEMBL Server
-    participant ChEMBL_C as ChEMBL Client
-    participant API_H as HGNC API
-    participant API_U as UniProt API
-    participant API_C as ChEMBL API
+    participant Client as API Client<br/>(e.g., HGNCClient)
+    participant Lock as asyncio.Lock<br/>(self._lock)
+    participant HTTPClient as httpx.AsyncClient<br/>(connection pool)
+    participant API as External API
 
-    Note over Agent: User query: "Find drugs<br/>targeting TP53"
+    Note over Client,API: Rate Limit: 10 req/s (100ms delay)
 
-    %% Step 1: Gene resolution
-    rect rgb(230, 240, 255)
-        Note over Agent,API_H: Step 1: Resolve Gene Identity
-        Agent->>+Gateway: hgnc_search_genes("TP53")
-        Gateway->>+HGNC_S: search_genes("TP53")
-        HGNC_S->>+HGNC_C: search_genes("TP53")
-        HGNC_C->>+API_H: GET /search/alias_symbol/TP53
-        API_H-->>-HGNC_C: {docs: [{hgnc_id: "11998", symbol: "TP53"}]}
-        HGNC_C->>+API_H: GET /search/TP53
-        API_H-->>-HGNC_C: {docs: [...]}
-        HGNC_C-->>-HGNC_S: PaginationEnvelope<br/>{items: [HGNC:11998 (score: 1.0)]}
-        HGNC_S-->>-Gateway: PaginationEnvelope
-        Gateway-->>-Agent: PaginationEnvelope
+    par Request 1
+        Client->>Lock: async with self._lock
+        activate Lock
+        Note over Lock: Acquired lock
 
-        Agent->>Agent: Select HGNC:11998
+        Note over Client: now = asyncio.get_event_loop().time()
+        Note over Client: elapsed = now - self._last_request_time
+        Note over Client: if elapsed < 0.1: await sleep(0.1 - elapsed)
 
-        Agent->>+Gateway: hgnc_get_gene("HGNC:11998")
-        Gateway->>+HGNC_S: get_gene("HGNC:11998")
-        HGNC_S->>+HGNC_C: get_gene("HGNC:11998")
-        HGNC_C->>+API_H: GET /fetch/hgnc_id/11998
-        API_H-->>-HGNC_C: {docs: [{symbol: "TP53",<br/>uniprot_ids: ["P04637"], ...}]}
-        HGNC_C->>HGNC_C: Build Gene with<br/>cross_references
-        HGNC_C-->>-HGNC_S: Gene{id: "HGNC:11998",<br/>cross_references: {uniprot: ["P04637"]}}
-        HGNC_S-->>-Gateway: Gene
-        Gateway-->>-Agent: Gene
+        Client->>HTTPClient: await self._get(path)
+        activate HTTPClient
+        HTTPClient->>API: GET /search/p53
+        activate API
+        API-->>HTTPClient: 200 OK + JSON
+        deactivate API
+        HTTPClient-->>Client: httpx.Response
+        deactivate HTTPClient
+
+        Note over Client: self._last_request_time = time()
+        Client->>Lock: Release lock
+        deactivate Lock
+    and Request 2 (concurrent)
+        Client->>Lock: async with self._lock
+        Note over Lock: Waiting for lock...<br/>(blocked by Request 1)
+        activate Lock
+        Note over Lock: Acquired lock
+
+        Note over Client: Re-check timing after acquiring lock<br/>(thundering herd prevention)
+        Note over Client: elapsed = now - self._last_request_time
+        Note over Client: if elapsed < 0.1: await sleep(...)
+
+        Client->>HTTPClient: await self._get(path)
+        activate HTTPClient
+        HTTPClient->>API: GET /fetch/hgnc_id/11998
+        activate API
+        API-->>HTTPClient: 200 OK + JSON
+        deactivate API
+        HTTPClient-->>Client: httpx.Response
+        deactivate HTTPClient
+
+        Note over Client: self._last_request_time = time()
+        Client->>Lock: Release lock
+        deactivate Lock
     end
 
-    Note over Agent: Extract UniProt ID:<br/>P04637
+    Note over Client,API: Exponential Backoff on Rate Limit Error
 
-    %% Step 2: Protein lookup via cross-reference
-    rect rgb(240, 255, 240)
-        Note over Agent,API_U: Step 2: Retrieve Protein Details
-        Agent->>+Gateway: uniprot_get_protein("UniProtKB:P04637")
-        Gateway->>+UniProt_S: get_protein("UniProtKB:P04637")
-        UniProt_S->>+UniProt_C: get_protein("UniProtKB:P04637")
-        UniProt_C->>UniProt_C: Validate CURIE<br/>^UniProtKB:[A-Z][A-Z0-9]{5,9}$
-        UniProt_C->>+UniProt_C: _rate_limited_get()
-        UniProt_C->>+API_U: GET /uniprotkb/P04637.json
-        API_U-->>-UniProt_C: {primaryAccession: "P04637",<br/>proteinDescription: {...},<br/>uniProtKBCrossReferences: [...]}
-        UniProt_C->>UniProt_C: _map_cross_references()
-        Note right of UniProt_C: Map to 22-key registry:<br/>- hgnc<br/>- entrez<br/>- pdb<br/>- chembl
-        UniProt_C-->>-UniProt_S: Protein{id: "UniProtKB:P04637",<br/>cross_references: {chembl: "CHEMBL:4860"}}
-        UniProt_S-->>-Gateway: Protein (as dict)
-        Gateway-->>-Agent: Protein dict
-    end
+    Client->>Lock: async with self._lock
+    activate Lock
+    Client->>HTTPClient: await self._get(path)
+    activate HTTPClient
+    HTTPClient->>API: GET /search/brca
+    activate API
+    API-->>HTTPClient: 429 Too Many Requests<br/>Retry-After: 5
+    deactivate API
+    HTTPClient-->>Client: httpx.Response (429)
+    deactivate HTTPClient
+    Client->>Lock: Release lock (before backoff)
+    deactivate Lock
 
-    Note over Agent: Extract ChEMBL ID:<br/>CHEMBL:4860
+    Note over Client: Sleep OUTSIDE lock<br/>wait = retry_after or 2^attempt<br/>await asyncio.sleep(5)
 
-    %% Step 3: Compound lookup via triangulation
-    rect rgb(255, 240, 240)
-        Note over Agent,API_C: Step 3: Find Drug Compounds
-        Agent->>+Gateway: chembl_get_compound("CHEMBL:4860")
-        Gateway->>+ChEMBL_S: get_compound("CHEMBL:4860")
-        ChEMBL_S->>+ChEMBL_C: get_compound("CHEMBL:4860")
-        ChEMBL_C->>ChEMBL_C: Validate CURIE<br/>^CHEMBL:[0-9]+$
-        ChEMBL_C->>ChEMBL_C: Extract numeric ID: "4860"
-        ChEMBL_C->>+ChEMBL_C: _rate_limited_sdk_call()
-        Note right of ChEMBL_C: Acquire lock,<br/>enforce 100ms delay
-        ChEMBL_C->>ChEMBL_C: run_in_executor(<br/>SDK call)
-        Note right of ChEMBL_C: Wrap synchronous SDK<br/>in thread pool
-        ChEMBL_C->>+API_C: SDK: molecule.get("CHEMBL4860")
-        API_C-->>-ChEMBL_C: {molecule_chembl_id: "CHEMBL4860",<br/>pref_name: "...", max_phase: 4, ...}
-
-        ChEMBL_C->>+API_C: SDK: drug_indication.filter(<br/>molecule_chembl_id="CHEMBL4860")
-        API_C-->>-ChEMBL_C: [{mesh_heading: "Cancer"}, ...]
-
-        ChEMBL_C->>ChEMBL_C: _transform_to_compound()
-        ChEMBL_C->>ChEMBL_C: _build_cross_references()
-        ChEMBL_C-->>-ChEMBL_S: Compound dict with<br/>indications and cross_references
-        ChEMBL_S-->>-Gateway: Compound dict
-        Gateway-->>-Agent: Compound dict
-    end
-
-    Note over Agent: Final result: Drug compound<br/>with clinical phase and<br/>approved indications
+    Note over Client: Retry with lock
+    Client->>Lock: async with self._lock
+    activate Lock
+    Note over Client: Re-check timing after acquiring lock
+    Client->>HTTPClient: await self._get(path)
+    activate HTTPClient
+    HTTPClient->>API: GET /search/brca (retry)
+    activate API
+    API-->>HTTPClient: 200 OK + JSON
+    deactivate API
+    HTTPClient-->>Client: httpx.Response
+    deactivate HTTPClient
+    Client->>Lock: Release lock
+    deactivate Lock
 ```
 
 ### Explanation
 
-This flow demonstrates **cross-reference triangulation** - a key capability enabled by the 22-key cross-reference registry. The agent performs a multi-hop query across three different databases using identifiers from previous responses:
+**Connection Pooling** (`/src/lifesciences_mcp/clients/base.py:41-54`)
 
-**Step 1: Gene Resolution (HGNC:11998)**
-1. Agent searches for "TP53" using fuzzy search
-2. HGNC client performs alias boosting to prioritize "TP53" (a well-known alias for the gene)
-3. Agent selects top candidate `HGNC:11998`
-4. Agent retrieves full gene record which includes `cross_references.uniprot: ["P04637"]`
+1. **Lazy Initialization**: HTTP client created on first request
+2. **Connection Limits**: Configurable max_connections (default 10) with keep-alive
+3. **Shared Client**: Single `httpx.AsyncClient` instance per client class with connection reuse
+4. **Timeout Configuration**: Configurable timeout (default 30s)
+5. **Default Headers**: `Accept: application/json` for all requests
 
-**Step 2: Protein Lookup via Cross-Reference (UniProtKB:P04637)**
-5. Agent extracts UniProt ID from gene's cross-references
-6. Formats as CURIE: `UniProtKB:P04637`
-7. UniProt client validates CURIE format: `^UniProtKB:[A-Z][A-Z0-9]{5,9}$` (clients/uniprot.py:328)
-8. Retrieves protein record from `/uniprotkb/{accession}.json` endpoint
-9. `_map_cross_references()` extracts ChEMBL target ID from UniProt's cross-references (clients/uniprot.py:114-168)
-10. Returns protein with `cross_references.chembl: "CHEMBL:4860"`
+**Rate Limiting Implementation** (`/src/lifesciences_mcp/clients/hgnc.py:62-108`)
 
-**Step 3: Compound Lookup via Triangulation (CHEMBL:4860)**
-11. Agent extracts ChEMBL ID from protein's cross-references
-12. ChEMBL client validates CURIE and extracts numeric ID "4860"
-13. **SDK wrapping**: ChEMBL uses synchronous SDK, wrapped with `run_in_executor` (clients/chembl.py:94-123)
-14. Makes **two SDK calls** in sequence:
-    - `molecule.get("CHEMBL4860")` for compound data
-    - `drug_indication.filter()` for approved indications (lines 561-571)
-15. Returns compound with clinical phase, indications, and additional cross-references
+1. **Lock Acquisition**: Uses `asyncio.Lock()` for request serialization
+2. **Timing Check**: Calculates elapsed time since last request
+3. **Delay Enforcement**: If elapsed < RATE_LIMIT_DELAY, sleeps for remaining time
+4. **Request Execution**: Makes HTTP request inside lock
+5. **Timestamp Update**: Updates `self._last_request_time` after request completes
+6. **Lock Release**: Automatic via context manager
 
-**Key Design Patterns:**
-- **Cross-reference registry**: 22-key standard enables identifier hopping across databases
-- **CURIE format enforcement**: Each client validates format before API calls
-- **SDK wrapping**: ChEMBL's synchronous SDK is wrapped with `asyncio.run_in_executor()` (ADR-001 §2 exception)
-- **Rate limiting per-client**: Each client has independent rate limiting (10 req/s HGNC, 10 req/s UniProt, 10 req/s ChEMBL)
-- **Lazy initialization**: Each server creates client singleton on first use
+**Thundering Herd Prevention** (`/src/lifesciences_mcp/clients/hgnc.py:97-106`)
 
-### Key Code References
+Critical detail: After waking from backoff sleep, the code re-checks timing after acquiring lock. This prevents multiple concurrent requests from overwhelming the API after a rate limit error.
 
-- **Cross-reference extraction**: `src/lifesciences_mcp/clients/hgnc.py` (lines 333-344) - _build_cross_references()
-- **UniProt cross-ref mapping**: `src/lifesciences_mcp/clients/uniprot.py` (lines 114-168) - _map_cross_references() with 22-key registry
-- **ChEMBL SDK wrapping**: `src/lifesciences_mcp/clients/chembl.py` (lines 94-123) - _rate_limited_sdk_call() with run_in_executor
-- **ChEMBL indication fetching**: `src/lifesciences_mcp/clients/chembl.py` (lines 558-573) - Separate API call for drug indications
-- **Gateway prefix routing**: `src/lifesciences_mcp/servers/gateway.py` (lines 52-109) - mcp.mount() for all 12 servers
-- **Cross-reference model**: `src/lifesciences_mcp/models/gene.py` (lines 27-143) - CrossReferences with omit-if-null pattern
+**Exponential Backoff** (`/src/lifesciences_mcp/clients/hgnc.py:84-107`)
 
----
+1. **Error Detection**: Check for 429, 403, 503 status codes
+2. **Retry-After Header**: Prefers server-specified wait time
+3. **Exponential Calculation**: Falls back to `2^attempt` seconds (1s, 2s, 4s)
+4. **Sleep Outside Lock**: Allows other requests to proceed during backoff
+5. **Max Retries**: Default 3 attempts (configurable via MAX_RETRIES)
 
-## 3. Tool Permission Callback Flow
+**SDK Wrapping Pattern** (ChEMBL example, `/src/lifesciences_mcp/clients/chembl.py:94-123`)
 
-**Scenario:** MCP client validates tool availability and checks permissions before allowing execution
+For synchronous SDKs (e.g., ChEMBL's chembl_webresource_client):
 
-### Sequence Diagram
+1. **ThreadPoolExecutor**: Lazy-initialized thread pool (Python defaults: min(32, cpu_count+4))
+2. **run_in_executor**: Wraps synchronous SDK calls for async compatibility
+3. **Rate Limiting**: Same lock-based pattern applied before executor call
+4. **Error Mapping**: Catches SDK exceptions and maps to canonical error codes
+
+**Key Files:**
+- Base client: `/src/lifesciences_mcp/clients/base.py` (LifeSciencesClient)
+- HGNC client: `/src/lifesciences_mcp/clients/hgnc.py` (rate limiting example)
+- ChEMBL client: `/src/lifesciences_mcp/clients/chembl.py` (SDK wrapping example)
+- STRING client: `/src/lifesciences_mcp/clients/string.py` (rate limiting example)
+
+**Rate Limit Configurations:**
+- HGNC: 10 req/s (100ms delay)
+- STRING: 1 req/s (1000ms delay)
+- ChEMBL: 10 req/s (100ms delay)
+- UniProt: 10 req/s (100ms delay)
+- ClinicalTrials.gov: 1 req/s (1000ms delay)
+
+## 3. Error Recovery Flow
+
+The error recovery pattern enables autonomous agent self-correction through structured errors with actionable recovery hints. This is a key feature for agentic workflows.
 
 ```mermaid
 sequenceDiagram
-    participant MCP_Client as MCP Client<br/>(Claude Desktop, etc.)
-    participant Gateway as Gateway Server
-    participant Server as Domain Server<br/>(e.g., HGNC)
-    participant FastMCP as FastMCP Framework
+    participant Agent
+    participant MCPServer as MCP Server<br/>(UniProt)
+    participant Client as UniProtClient
+    participant API as UniProt API
 
-    Note over MCP_Client: Client connects to<br/>MCP server
+    Note over Agent,API: Scenario 1: UNRESOLVED_ENTITY (agent uses raw string)
 
-    %% Tool discovery
-    rect rgb(240, 248, 255)
-        Note over MCP_Client,FastMCP: Tool Discovery Phase
-        MCP_Client->>+Gateway: initialize()
-        Note right of MCP_Client: MCP protocol:<br/>Initialize request
+    Agent->>MCPServer: get_protein("P04637")
+    activate MCPServer
+    Note over MCPServer: Missing "UniProtKB:" prefix
+    MCPServer->>Client: await client.get_protein("P04637")
+    activate Client
 
-        Gateway->>+FastMCP: Get server capabilities
-        FastMCP->>FastMCP: Enumerate @mcp.tool<br/>decorated functions
-        Note right of FastMCP: Discovers tools from<br/>all mounted servers
+    Note over Client: Validate CURIE format<br/>Pattern: ^UniProtKB:[A-Z0-9]+$<br/>FAILED
 
-        FastMCP->>FastMCP: Build tool registry:<br/>- hgnc_search_genes<br/>- hgnc_get_gene<br/>- uniprot_search_proteins<br/>...
+    Client-->>MCPServer: ErrorEnvelope {<br/>  success: false,<br/>  error: {<br/>    code: "UNRESOLVED_ENTITY",<br/>    message: "Invalid UniProtKB CURIE: P04637",<br/>    recovery_hint: "Call search_proteins to resolve identifier first.",<br/>    invalid_input: "P04637"<br/>  }<br/>}
+    deactivate Client
+    MCPServer-->>Agent: ErrorEnvelope
+    deactivate MCPServer
 
-        FastMCP-->>-Gateway: Tool list with schemas
-        Gateway-->>-MCP_Client: initialize_response:<br/>{capabilities: {tools: [...]}}
+    Note over Agent: Agent reads recovery_hint<br/>"Call search_proteins..."
 
-        MCP_Client->>MCP_Client: Store available tools
-    end
+    Agent->>MCPServer: search_proteins("TP53", page_size=5)
+    activate MCPServer
+    MCPServer->>Client: await client.search_proteins(...)
+    activate Client
+    Client->>API: GET /uniprotkb/search?query=TP53
+    activate API
+    API-->>Client: 200 OK + JSON
+    deactivate API
+    Client-->>MCPServer: PaginationEnvelope[ProteinSearchCandidate]<br/>{items: [<br/>  {id: "UniProtKB:P04637", gene_names: ["TP53"], score: 1.0}<br/>]}
+    deactivate Client
+    MCPServer-->>Agent: PaginationEnvelope
+    deactivate MCPServer
 
-    %% Tool listing
-    rect rgb(245, 255, 245)
-        Note over MCP_Client,FastMCP: Tool Listing Phase
-        MCP_Client->>+Gateway: tools/list
-        Note right of MCP_Client: MCP protocol:<br/>List available tools
+    Note over Agent: Extract valid CURIE from top result<br/>curie = "UniProtKB:P04637"
 
-        Gateway->>+FastMCP: List all tools
-        FastMCP->>FastMCP: For each mounted server:<br/>Get @mcp.tool functions
+    Agent->>MCPServer: get_protein("UniProtKB:P04637")
+    activate MCPServer
+    MCPServer->>Client: await client.get_protein("UniProtKB:P04637")
+    activate Client
 
-        loop For each server
-            FastMCP->>Server: Get tool definitions
-            Server-->>FastMCP: Tool metadata:<br/>- name (with prefix)<br/>- description<br/>- inputSchema (JSON Schema)
-        end
+    Note over Client: Validation passes
 
-        FastMCP-->>-Gateway: Tool list with full schemas
-        Gateway-->>-MCP_Client: tools/list_response:<br/>[{name, description, inputSchema}, ...]
+    Client->>API: GET /uniprotkb/P04637
+    activate API
+    API-->>Client: 200 OK + Protein data
+    deactivate API
+    Client-->>MCPServer: Protein {<br/>  id: "UniProtKB:P04637",<br/>  gene_names: ["TP53"],<br/>  cross_references: {...}<br/>}
+    deactivate Client
+    MCPServer-->>Agent: Protein (SUCCESS)
+    deactivate MCPServer
 
-        Note over MCP_Client: Display available tools<br/>to user/agent
-    end
+    Note over Agent,API: Scenario 2: AMBIGUOUS_QUERY (query too short)
 
-    %% Tool invocation with validation
-    rect rgb(255, 245, 245)
-        Note over MCP_Client,FastMCP: Tool Invocation Phase
+    Agent->>MCPServer: search_proteins("a")
+    activate MCPServer
+    MCPServer->>Client: await client.search_proteins("a")
+    activate Client
 
-        MCP_Client->>MCP_Client: Validate tool exists<br/>in capabilities
+    Note over Client: Query length check: len("a") < 2<br/>FAILED
 
-        alt Tool not found
-            MCP_Client->>MCP_Client: Return error to agent:<br/>"Tool not available"
-        else Tool available
-            MCP_Client->>MCP_Client: Validate arguments against<br/>inputSchema (JSON Schema)
+    Client-->>MCPServer: ErrorEnvelope {<br/>  error: {<br/>    code: "AMBIGUOUS_QUERY",<br/>    message: "Query 'a' too short",<br/>    recovery_hint: "Provide at least 2 characters for search",<br/>    invalid_input: "a"<br/>  }<br/>}
+    deactivate Client
+    MCPServer-->>Agent: ErrorEnvelope
+    deactivate MCPServer
 
-            alt Invalid arguments
-                MCP_Client->>MCP_Client: Return validation error:<br/>"Missing required parameter"
-            else Valid arguments
-                MCP_Client->>+Gateway: tools/call<br/>{name: "hgnc_search_genes",<br/>arguments: {query: "BRCA1"}}
+    Note over Agent: Agent reads hint, provides better query
 
-                Gateway->>+FastMCP: Route to tool handler
-                FastMCP->>FastMCP: Parse tool name prefix:<br/>"hgnc_search_genes" -> HGNC server
+    Agent->>MCPServer: search_proteins("insulin")
+    activate MCPServer
+    MCPServer->>Client: await client.search_proteins("insulin")
+    activate Client
+    Client->>API: GET /uniprotkb/search?query=insulin
+    activate API
+    API-->>Client: 200 OK + Results
+    deactivate API
+    Client-->>MCPServer: PaginationEnvelope (SUCCESS)
+    deactivate Client
+    MCPServer-->>Agent: PaginationEnvelope
+    deactivate MCPServer
 
-                FastMCP->>+Server: search_genes(query="BRCA1")
-                Note right of Server: Execute tool function
-                Server->>Server: Validate inputs<br/>(query length >= 2)
+    Note over Agent,API: Scenario 3: RATE_LIMITED (exponential backoff)
 
-                alt Validation fails
-                    Server-->>FastMCP: ErrorEnvelope:<br/>{code: AMBIGUOUS_QUERY,<br/>recovery_hint: "..."}
-                    FastMCP-->>Gateway: Error response
-                    Gateway-->>MCP_Client: tools/call_response:<br/>{error: {...}}
-                else Validation succeeds
-                    Server->>Server: Execute client logic
-                    Server-->>-FastMCP: PaginationEnvelope
-                    FastMCP->>FastMCP: Serialize to JSON
-                    FastMCP-->>-Gateway: Tool result
-                    Gateway-->>-MCP_Client: tools/call_response:<br/>{content: [{type: "text",<br/>text: JSON}]}
-                end
-            end
-        end
-    end
+    Agent->>MCPServer: search_proteins("cancer")
+    activate MCPServer
+    MCPServer->>Client: await client.search_proteins("cancer")
+    activate Client
+    Client->>API: GET /uniprotkb/search?query=cancer
+    activate API
+    API-->>Client: 429 Too Many Requests<br/>Retry-After: 60
+    deactivate API
+
+    Note over Client: Exponential backoff (attempt 1/3)<br/>wait = retry_after or 2^0 = 60s
+    Note over Client: await asyncio.sleep(60)
+
+    Client->>API: GET /uniprotkb/search?query=cancer (retry)
+    activate API
+    API-->>Client: 200 OK + Results
+    deactivate API
+
+    Client-->>MCPServer: PaginationEnvelope (SUCCESS)
+    deactivate Client
+    MCPServer-->>Agent: PaginationEnvelope
+    deactivate MCPServer
 ```
 
 ### Explanation
 
-This flow shows the **MCP protocol's tool discovery and validation mechanism**. The FastMCP framework handles all permission and capability negotiation automatically:
+**Error Codes and Recovery Hints** (`/src/lifesciences_mcp/models/envelopes.py:16-108`)
 
-**Tool Discovery Phase**
-1. MCP client (e.g., Claude Desktop) sends `initialize()` request on connection
-2. Gateway server queries FastMCP framework for capabilities
-3. FastMCP enumerates all `@mcp.tool` decorated functions across mounted servers (gateway.py:52-109)
-4. Returns server capabilities including available tools
-5. Client stores tool list for validation
+The ErrorEnvelope model defines 5 canonical error codes with factory methods:
 
-**Tool Listing Phase**
-6. Client requests full tool list via `tools/list` MCP protocol message
-7. FastMCP iterates through all mounted servers and collects tool definitions
-8. Each tool includes:
-   - Name (with server prefix, e.g., `hgnc_search_genes`)
-   - Description (from docstring)
-   - Input schema (auto-generated from function signature using Pydantic)
-9. Client displays tools to user/agent
+1. **UNRESOLVED_ENTITY**: Raw string passed to strict lookup tool
+   - Recovery hint: "Call search_genes to resolve the identifier first."
+   - Example: `get_gene("BRCA1")` instead of `get_gene("HGNC:1100")`
+   - Implementation: `/src/lifesciences_mcp/models/envelopes.py:47-56`
 
-**Tool Invocation Phase**
-10. Client validates tool exists in capabilities list before sending request
-11. Client validates arguments against JSON Schema from inputSchema
-12. If validation fails, client returns error without network call
-13. If valid, client sends `tools/call` message with tool name and arguments
-14. FastMCP routes to correct server based on prefix
-15. Server function executes with input validation
-16. Returns either PaginationEnvelope (success) or ErrorEnvelope (failure)
-17. FastMCP serializes result to JSON and wraps in MCP response
+2. **ENTITY_NOT_FOUND**: Valid CURIE format but entity doesn't exist in database
+   - Recovery hint: "Verify the HGNC ID format or try a synonym search."
+   - Example: `get_gene("HGNC:99999999")`
+   - Implementation: `/src/lifesciences_mcp/models/envelopes.py:58-68`
 
-**Key Design Patterns:**
-- **Auto-discovery**: `@mcp.tool` decorator automatically registers tools
-- **Prefix-based routing**: Gateway uses prefixes to route to correct server
-- **JSON Schema validation**: FastMCP auto-generates schemas from Pydantic models
-- **No explicit permissions**: All mounted tools are available (permissions handled by MCP client)
-- **Error envelope pattern**: All errors use canonical ErrorEnvelope format
+3. **AMBIGUOUS_QUERY**: Too many/few results or query too short
+   - Recovery hint: "Refine query with more specific terms."
+   - Example: `search_genes("a")` (< 2 chars) or `search_genes("p")` (100+ results)
+   - Implementation: `/src/lifesciences_mcp/models/envelopes.py:70-80`
 
-**Important Note on Permissions:**
-The current implementation **does not implement tool-level permissions**. All tools mounted on the gateway are available to any connected client. The MCP protocol supports permission callbacks, but FastMCP handles this at the client connection level, not per-tool. For production deployments requiring fine-grained access control, consider:
-- Deploying separate gateway instances for different permission levels
-- Using MCP client-side filtering of available tools
-- Implementing custom middleware in FastMCP for per-tool authorization
+4. **RATE_LIMITED**: Upstream API throttling
+   - Recovery hint: "Retry after {N} seconds." (with Retry-After header value)
+   - Example: API returns 429 status
+   - Implementation: `/src/lifesciences_mcp/models/envelopes.py:82-94`
 
-### Key Code References
+5. **UPSTREAM_ERROR**: API failures (5xx errors, timeouts, network errors)
+   - Recovery hint: "HGNC API may be temporarily unavailable. Retry later."
+   - Example: API returns 500, 502, 503, or request timeout
+   - Implementation: `/src/lifesciences_mcp/models/envelopes.py:96-108`
 
-- **Gateway mounting**: `src/lifesciences_mcp/servers/gateway.py` (lines 52-109) - mcp.mount() with prefix and tool_names
-- **Tool decorator**: `src/lifesciences_mcp/servers/hgnc.py` (line 36) - @mcp.tool annotation
-- **FastMCP framework**: Uses Pydantic models for auto-schema generation
-- **Error envelope**: `src/lifesciences_mcp/models/envelopes.py` (lines 36-109) - ErrorEnvelope with recovery hints
-- **Input validation**: Each client validates inputs before API calls (e.g., clients/hgnc.py:136-137)
+**Error Response Structure**
 
----
-
-## 4. MCP Server Communication Flow
-
-**Scenario:** Gateway server composes multiple domain servers and routes tool calls with prefix-based resolution
-
-### Sequence Diagram
-
-```mermaid
-sequenceDiagram
-    participant Client as MCP Client
-    participant Gateway as Gateway Server<br/>(gateway.py)
-    participant FastMCP as FastMCP Framework
-    participant HGNC as HGNC Server<br/>(hgnc.py)
-    participant UniProt as UniProt Server<br/>(uniprot.py)
-    participant ChEMBL as ChEMBL Server<br/>(chembl.py)
-
-    Note over Client,ChEMBL: Server Initialization Phase
-
-    rect rgb(245, 245, 250)
-        Note over Gateway: Gateway server starts
-        Gateway->>Gateway: Import all server modules:<br/>from servers.hgnc import mcp as hgnc_mcp<br/>from servers.uniprot import mcp as uniprot_mcp<br/>...
-
-        Note over HGNC: HGNC server module loads
-        HGNC->>HGNC: mcp = FastMCP("HGNC Gene Server")
-        HGNC->>HGNC: Define @mcp.tool functions:<br/>- search_genes<br/>- get_gene
-
-        Note over UniProt: UniProt server module loads
-        UniProt->>UniProt: mcp = FastMCP("UniProt Protein Server")
-        UniProt->>UniProt: Define @mcp.tool functions:<br/>- search_proteins<br/>- get_protein
-
-        Note over ChEMBL: ChEMBL server module loads
-        ChEMBL->>ChEMBL: mcp = FastMCP("ChEMBL Compound Server")
-        ChEMBL->>ChEMBL: Define @mcp.tool functions:<br/>- search_compounds<br/>- get_compound<br/>- get_compounds_batch
-
-        Gateway->>Gateway: Create gateway server:<br/>mcp = FastMCP("Life Sciences MCP Gateway")
-
-        Gateway->>+FastMCP: mcp.mount(hgnc_mcp,<br/>prefix="hgnc",<br/>as_proxy=False,<br/>tool_names={<br/> "search_genes": "hgnc_search_genes",<br/> "get_gene": "hgnc_get_gene"<br/>})
-        FastMCP->>FastMCP: Register tools with prefixed names
-        FastMCP-->>-Gateway: Mounted
-
-        Gateway->>+FastMCP: mcp.mount(uniprot_mcp,<br/>prefix="uniprot",<br/>tool_names={...})
-        FastMCP-->>-Gateway: Mounted
-
-        Gateway->>+FastMCP: mcp.mount(chembl_mcp,<br/>prefix="chembl",<br/>tool_names={...})
-        FastMCP-->>-Gateway: Mounted
-
-        Note over Gateway: ...mount remaining 9 servers
-
-        Gateway->>Gateway: mcp.run()
-        Note right of Gateway: Listen for MCP<br/>client connections
-    end
-
-    Note over Client,ChEMBL: Tool Call Routing Phase
-
-    rect rgb(255, 250, 245)
-        Client->>+Gateway: tools/call<br/>{name: "hgnc_search_genes",<br/>arguments: {query: "BRCA1"}}
-
-        Gateway->>+FastMCP: Dispatch tool call
-        FastMCP->>FastMCP: Parse tool name:<br/>"hgnc_search_genes"
-        FastMCP->>FastMCP: Lookup in tool registry:<br/>prefix="hgnc",<br/>original_name="search_genes"
-
-        Note right of FastMCP: as_proxy=False means<br/>direct function call,<br/>not HTTP proxy
-
-        FastMCP->>+HGNC: search_genes(query="BRCA1")
-        Note right of HGNC: Direct Python<br/>function call,<br/>no network overhead
-
-        HGNC->>HGNC: get_client()
-        HGNC->>HGNC: client.search_genes(...)
-        HGNC-->>-FastMCP: PaginationEnvelope
-
-        FastMCP->>FastMCP: Serialize response to JSON
-        FastMCP-->>-Gateway: JSON result
-        Gateway-->>-Client: tools/call_response
-    end
-
-    rect rgb(245, 255, 250)
-        Client->>+Gateway: tools/call<br/>{name: "uniprot_get_protein",<br/>arguments: {uniprot_id: "UniProtKB:P04637"}}
-
-        Gateway->>+FastMCP: Dispatch tool call
-        FastMCP->>FastMCP: Parse tool name:<br/>"uniprot_get_protein"
-        FastMCP->>FastMCP: Lookup: prefix="uniprot",<br/>original_name="get_protein"
-
-        FastMCP->>+UniProt: get_protein(uniprot_id="UniProtKB:P04637")
-        UniProt->>UniProt: get_client()
-        UniProt->>UniProt: client.get_protein(...)
-        UniProt-->>-FastMCP: Protein dict
-
-        FastMCP->>FastMCP: Serialize to JSON
-        FastMCP-->>-Gateway: JSON result
-        Gateway-->>-Client: tools/call_response
-    end
-
-    rect rgb(255, 245, 250)
-        Client->>+Gateway: tools/call<br/>{name: "chembl_get_compounds_batch",<br/>arguments: {chembl_ids: ["CHEMBL:25", ...]}}
-
-        Gateway->>+FastMCP: Dispatch tool call
-        FastMCP->>FastMCP: Parse: prefix="chembl",<br/>original_name="get_compounds_batch"
-
-        FastMCP->>+ChEMBL: get_compounds_batch(chembl_ids=[...])
-        ChEMBL->>ChEMBL: get_client()
-        ChEMBL->>ChEMBL: client.get_compounds_batch(...)
-        ChEMBL-->>-FastMCP: List[dict] or ErrorEnvelope
-
-        FastMCP->>FastMCP: Serialize to JSON
-        FastMCP-->>-Gateway: JSON result
-        Gateway-->>-Client: tools/call_response
-    end
-```
-
-### Explanation
-
-This flow demonstrates the **gateway server composition pattern** that enables deploying all 12 servers as a single unified MCP endpoint:
-
-**Server Initialization Phase**
-1. Gateway server imports all 12 individual server modules (gateway.py:31-42)
-2. Each server module creates its own `FastMCP` instance with `@mcp.tool` decorated functions
-3. Gateway creates a new `FastMCP` instance for composition (line 49)
-4. Gateway mounts each server using `mcp.mount()` with three key parameters:
-   - **prefix**: Namespace for tool names (e.g., "hgnc", "uniprot")
-   - **as_proxy=False**: Direct function calls, not HTTP proxy (zero network overhead)
-   - **tool_names**: Map original names to prefixed names (e.g., "search_genes" → "hgnc_search_genes")
-5. FastMCP builds a unified tool registry with all prefixed tools
-6. Gateway runs as single MCP server listening for connections
-
-**Tool Call Routing Phase**
-7. Client sends `tools/call` with prefixed tool name (e.g., "hgnc_search_genes")
-8. FastMCP parses the tool name to extract prefix and original name
-9. Looks up the mounted server in the registry
-10. Since `as_proxy=False`, FastMCP makes a **direct Python function call** to the mounted server's tool
-11. No network overhead or serialization between gateway and domain servers
-12. Domain server executes the tool function using its client
-13. Result flows back through FastMCP to gateway to client
-
-**Key Design Patterns:**
-- **Composition over inheritance**: Gateway composes existing servers rather than reimplementing
-- **Direct mounting (as_proxy=False)**: Zero-overhead composition via Python function calls
-- **Prefix-based namespacing**: Prevents tool name collisions across 12 servers
-- **Explicit tool name mapping**: Clear mapping in gateway.py makes routing transparent
-- **Single deployment artifact**: All 12 servers run in one process
-
-**Benefits of this approach:**
-- **Single endpoint**: Clients connect to one gateway URL instead of 12 different servers
-- **Zero network overhead**: Direct function calls between gateway and domain servers
-- **Independent development**: Each server is independently testable and deployable
-- **Clear separation**: Gateway is pure composition (110 lines), domain servers own business logic
-
-**Alternative approaches considered:**
-- **HTTP proxy (as_proxy=True)**: Would add network latency for inter-server calls
-- **Single monolithic server**: Would create tight coupling and merge concerns
-- **Separate deployments**: Would require clients to manage 12 different connections
-
-### Key Code References
-
-- **Gateway composition**: `src/lifesciences_mcp/servers/gateway.py` (lines 29-109) - Import and mount all servers
-- **Server mounting**: `src/lifesciences_mcp/servers/gateway.py` (lines 52-54) - Example mount with prefix and tool_names
-- **HGNC server definition**: `src/lifesciences_mcp/servers/hgnc.py` (lines 22-82) - FastMCP instance with @mcp.tool functions
-- **UniProt server definition**: `src/lifesciences_mcp/servers/uniprot.py` (lines 20-98) - Independent server module
-- **ChEMBL server definition**: `src/lifesciences_mcp/servers/chembl.py` (lines 26-113) - Batch operation support
-
----
-
-## 5. Message Parsing and Routing
-
-**Scenario:** How requests are parsed from JSON, validated against Pydantic models, routed to handlers, and serialized back to JSON responses
-
-### Sequence Diagram
-
-```mermaid
-sequenceDiagram
-    participant Client as MCP Client
-    participant Transport as STDIO/SSE Transport
-    participant FastMCP as FastMCP Framework
-    participant Pydantic as Pydantic Models
-    participant Handler as Tool Handler<br/>(server function)
-    participant DomainClient as Domain Client<br/>(e.g., HGNCClient)
-
-    Note over Client,DomainClient: Request Parsing Phase
-
-    rect rgb(245, 250, 255)
-        Client->>Client: Build MCP request:<br/>{jsonrpc: "2.0",<br/>method: "tools/call",<br/>params: {name: "hgnc_search_genes",<br/>arguments: {query: "BRCA1",<br/>page_size: 50}}}
-
-        Client->>+Transport: Write JSON to STDIO
-        Note right of Client: JSON-RPC 2.0<br/>over STDIO
-
-        Transport->>Transport: Read from stdin
-        Transport->>Transport: Parse JSON bytes
-
-        Transport->>+FastMCP: Dispatch MCP message
-        Note right of Transport: MCP protocol<br/>message routing
-
-        FastMCP->>FastMCP: Parse method: "tools/call"
-        FastMCP->>FastMCP: Extract params:<br/>{name: "hgnc_search_genes",<br/>arguments: {...}}
-
-        FastMCP->>FastMCP: Lookup tool in registry
-        FastMCP->>FastMCP: Get function signature<br/>for search_genes()
-
-        Note over FastMCP,Pydantic: Automatic Schema Validation
-
-        FastMCP->>+Pydantic: Validate arguments against<br/>function signature:<br/>search_genes(<br/> query: str,<br/> slim: bool = False,<br/> cursor: str | None = None,<br/> page_size: int = 50<br/>)
-
-        Pydantic->>Pydantic: Check required params:<br/>query is present ✓
-        Pydantic->>Pydantic: Validate types:<br/>query is str ✓<br/>page_size is int ✓
-        Pydantic->>Pydantic: Apply defaults:<br/>slim = False<br/>cursor = None
-
-        alt Validation fails
-            Pydantic-->>FastMCP: ValidationError:<br/>"query is required"
-            FastMCP->>FastMCP: Build error response:<br/>{error: {code: -32602,<br/>message: "Invalid params"}}
-            FastMCP-->>Transport: JSON-RPC error
-            Transport-->>Client: Error response
-        else Validation succeeds
-            Pydantic-->>-FastMCP: Validated arguments:<br/>{query: "BRCA1",<br/>slim: False,<br/>cursor: None,<br/>page_size: 50}
-        end
-    end
-
-    Note over Client,DomainClient: Tool Execution Phase
-
-    rect rgb(250, 255, 245)
-        FastMCP->>+Handler: search_genes(**validated_args)
-        Note right of FastMCP: Direct function call<br/>with unpacked kwargs
-
-        Handler->>+DomainClient: client.search_genes(<br/>query="BRCA1",<br/>slim=False,<br/>cursor=None,<br/>page_size=50)
-
-        DomainClient->>DomainClient: Execute business logic
-        DomainClient->>DomainClient: Build PaginationEnvelope:<br/>PaginationEnvelope.create(<br/> items=[...],<br/> cursor="...",<br/> total_count=5,<br/> page_size=50<br/>)
-
-        Note over DomainClient,Pydantic: Response Model Construction
-
-        DomainClient->>+Pydantic: Instantiate PaginationEnvelope
-        Pydantic->>Pydantic: Validate SearchCandidate items
-        loop For each candidate
-            Pydantic->>Pydantic: Validate HGNC CURIE:<br/>^HGNC:\d+$
-            Pydantic->>Pydantic: Validate score: 0.0 <= x <= 1.0
-            Pydantic->>Pydantic: Validate required fields:<br/>id, symbol, name, score
-        end
-
-        Pydantic->>Pydantic: Validate Pagination:<br/>cursor, total_count, page_size
-        Pydantic-->>-DomainClient: Valid PaginationEnvelope instance
-
-        DomainClient-->>-Handler: PaginationEnvelope
-        Handler-->>-FastMCP: PaginationEnvelope
-    end
-
-    Note over Client,DomainClient: Response Serialization Phase
-
-    rect rgb(255, 250, 245)
-        FastMCP->>+Pydantic: Serialize PaginationEnvelope<br/>to JSON
-
-        Pydantic->>Pydantic: model_dump(exclude_none=True)
-        Note right of Pydantic: Omit keys with None values<br/>(Constitution Principle III)
-
-        Pydantic->>Pydantic: Convert items to dicts
-        loop For each SearchCandidate
-            Pydantic->>Pydantic: candidate.model_dump():<br/>{id: "HGNC:1100",<br/>symbol: "BRCA1",<br/>name: "...",<br/>score: 1.0}
-        end
-
-        Pydantic->>Pydantic: Build final structure:<br/>{items: [...],<br/>pagination: {<br/> cursor: "...",<br/> total_count: 5,<br/> page_size: 50<br/>}}
-
-        Pydantic-->>-FastMCP: Python dict
-
-        FastMCP->>FastMCP: json.dumps(result)
-        FastMCP->>FastMCP: Build MCP response:<br/>{jsonrpc: "2.0",<br/>id: request_id,<br/>result: {<br/> content: [{<br/>  type: "text",<br/>  text: JSON_STRING<br/> }]<br/>}}
-
-        FastMCP-->>-Transport: JSON-RPC response
-        Transport->>Transport: Write JSON to stdout
-        Transport-->>-Client: Read from stdout
-
-        Client->>Client: Parse JSON response
-        Client->>Client: Extract result.content[0].text
-        Client->>Client: JSON.parse(text) to get<br/>PaginationEnvelope structure
-    end
-```
-
-### Explanation
-
-This flow shows the complete **request/response lifecycle** with automatic Pydantic validation and serialization:
-
-**Request Parsing Phase**
-1. MCP client builds JSON-RPC 2.0 request with method="tools/call"
-2. Request includes tool name and arguments as JSON
-3. Transport layer (STDIO/SSE) reads JSON bytes from stdin
-4. FastMCP parses method and extracts params
-5. FastMCP looks up tool function and gets its Python signature
-6. **Pydantic auto-validation**: FastMCP uses Pydantic to validate arguments against function signature
-   - Checks required parameters are present
-   - Validates types match annotations (str, int, bool, etc.)
-   - Applies default values for optional parameters
-7. If validation fails, returns JSON-RPC error response immediately
-8. If valid, unpacks arguments as kwargs for function call
-
-**Tool Execution Phase**
-9. FastMCP calls tool handler function with validated arguments
-10. Handler delegates to domain client
-11. Client executes business logic and constructs response model
-12. **Pydantic model construction**: Client builds PaginationEnvelope using Pydantic models
-13. Pydantic validates all fields:
-    - SearchCandidate items must have valid HGNC CURIEs (regex: `^HGNC:\d+$`)
-    - Scores must be between 0.0 and 1.0 (field constraint)
-    - All required fields must be present
-14. If any validation fails, raises ValidationError
-15. Returns valid PaginationEnvelope instance
-
-**Response Serialization Phase**
-16. FastMCP receives Pydantic model from handler
-17. Calls `model_dump(exclude_none=True)` to serialize to dict
-18. **Omit-if-null pattern**: None values are excluded from dict (Constitution Principle III)
-19. Nested models (SearchCandidate, Pagination) are recursively serialized
-20. FastMCP wraps dict in MCP response format
-21. JSON serializes dict to string
-22. Transport writes JSON to stdout
-23. Client reads and parses response
-
-**Key Design Patterns:**
-- **Pydantic-driven validation**: Function signatures with type hints enable auto-validation
-- **Fail-fast**: Invalid requests are rejected before reaching business logic
-- **Type safety**: Pydantic ensures runtime types match annotations
-- **Omit-if-null**: `exclude_none=True` removes clutter from JSON responses
-- **Nested model serialization**: Pydantic handles complex nested structures automatically
-
-**Validation Examples:**
 ```python
-# Valid request
 {
-  "query": "BRCA1",      # str ✓
-  "page_size": 50        # int ✓
+  "success": false,
+  "error": {
+    "code": "UNRESOLVED_ENTITY",
+    "message": "The input 'P04637' is not a valid UniProtKB CURIE.",
+    "recovery_hint": "Call search_proteins to resolve the identifier first. Expected format: UniProtKB:<accession>",
+    "invalid_input": "P04637"
+  }
 }
+```
 
-# Invalid request - missing required param
-{
-  "page_size": 50
-}
-# → ValidationError: "query is required"
+**Agent Recovery Workflow** (Test example: `/tests/integration/test_error_recovery.py:28-80`)
 
-# Invalid request - wrong type
-{
-  "query": "BRCA1",
-  "page_size": "50"     # str instead of int
-}
-# → ValidationError: "page_size must be int"
+1. **Error Detection**: Agent receives ErrorEnvelope instead of expected data model
+2. **Hint Extraction**: Agent reads `error.recovery_hint` field
+3. **Action Decision**: Agent parses hint and determines corrective action
+4. **Retry**: Agent calls suggested tool/method with corrected input
+5. **Success**: Agent receives valid data and continues workflow
 
-# Invalid response - bad CURIE format
-SearchCandidate(
-  id="BRCA1",           # Not HGNC:NNNNN format
-  symbol="BRCA1",
-  name="...",
-  score=1.0
+**Multi-Step Recovery Example** (`/tests/integration/test_error_recovery.py:142-167`)
+
+Agent can recover from multiple sequential errors:
+1. Query too short ("p") → AMBIGUOUS_QUERY → Agent provides longer query ("p53")
+2. Invalid CURIE ("P04637") → UNRESOLVED_ENTITY → Agent uses CURIE from search
+3. Final success with complete protein record
+
+**ClinicalTrials Error Recovery** (`/tests/integration/test_error_recovery.py:186-226`)
+
+Demonstrates complete error→hint→recovery→success cycle:
+1. Query string to get_trial ("breast cancer treatment") → UNRESOLVED_ENTITY
+2. Recovery hint suggests: "Call search_trials to resolve identifier first"
+3. Agent calls search_trials, extracts valid NCT CURIE
+4. Agent retries get_trial with valid CURIE → SUCCESS
+
+**Key Components:**
+- Error models: `/src/lifesciences_mcp/models/envelopes.py` (ErrorEnvelope, ErrorDetail, ErrorCode)
+- Error recovery tests: `/tests/integration/test_error_recovery.py` (comprehensive test suite)
+- Client error handling: All clients inherit error mapping pattern
+
+**Error Mapping Pattern** (ChEMBL example, `/src/lifesciences_mcp/clients/chembl.py:191-244`)
+
+Each client maps SDK/API exceptions to canonical error codes:
+- 404 → ENTITY_NOT_FOUND
+- 429 → RATE_LIMITED
+- 500/502/503 → UPSTREAM_ERROR
+- Validation failures → UNRESOLVED_ENTITY
+
+## 4. Gateway Server Composition Flow
+
+The gateway server composes 12 individual MCP servers into a unified interface without proxy overhead. This enables deployment to FastMCP Cloud as a single entrypoint.
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Gateway as Gateway Server<br/>(gateway.py)
+    participant HGNCServer as hgnc_mcp<br/>(FastMCP instance)
+    participant UniProtServer as uniprot_mcp<br/>(FastMCP instance)
+    participant ChEMBLServer as chembl_mcp<br/>(FastMCP instance)
+
+    Note over Gateway: Initialization (module load)
+
+    Gateway->>Gateway: mcp = FastMCP("Life Sciences MCP Gateway")
+
+    Gateway->>HGNCServer: import hgnc.mcp
+    activate HGNCServer
+    Note over HGNCServer: FastMCP("HGNC Gene Server")<br/>@mcp.tool search_genes<br/>@mcp.tool get_gene
+    HGNCServer-->>Gateway: hgnc_mcp instance
+    deactivate HGNCServer
+
+    Gateway->>UniProtServer: import uniprot.mcp
+    activate UniProtServer
+    Note over UniProtServer: FastMCP("UniProt Protein Server")<br/>@mcp.tool search_proteins<br/>@mcp.tool get_protein
+    UniProtServer-->>Gateway: uniprot_mcp instance
+    deactivate UniProtServer
+
+    Gateway->>ChEMBLServer: import chembl.mcp
+    activate ChEMBLServer
+    Note over ChEMBLServer: FastMCP("ChEMBL Compound Server")<br/>@mcp.tool search_compounds<br/>@mcp.tool get_compound<br/>@mcp.tool get_compounds_batch
+    ChEMBLServer-->>Gateway: chembl_mcp instance
+    deactivate ChEMBLServer
+
+    Note over Gateway: Mount servers with direct composition<br/>(as_proxy=False, no overhead)
+
+    Gateway->>Gateway: mcp.mount(hgnc_mcp, prefix="hgnc", as_proxy=False,<br/>  tool_names={<br/>    "search_genes": "hgnc_search_genes",<br/>    "get_gene": "hgnc_get_gene"<br/>  })
+
+    Gateway->>Gateway: mcp.mount(uniprot_mcp, prefix="uniprot", as_proxy=False,<br/>  tool_names={<br/>    "search_proteins": "uniprot_search_proteins",<br/>    "get_protein": "uniprot_get_protein"<br/>  })
+
+    Gateway->>Gateway: mcp.mount(chembl_mcp, prefix="chembl", as_proxy=False,<br/>  tool_names={<br/>    "search_compounds": "chembl_search_compounds",<br/>    "get_compound": "chembl_get_compound",<br/>    "get_compounds_batch": "chembl_get_compounds_batch"<br/>  })
+
+    Note over Gateway: ... mount remaining 9 servers
+
+    Note over Gateway: Gateway now exposes 34+ tools:<br/>hgnc_search_genes, hgnc_get_gene,<br/>uniprot_search_proteins, uniprot_get_protein,<br/>chembl_search_compounds, chembl_get_compound, etc.
+
+    Note over User,ChEMBLServer: Runtime: User calls gateway tool
+
+    User->>Gateway: call_tool("hgnc_search_genes", {"query": "BRCA", "page_size": 5})
+    activate Gateway
+
+    Note over Gateway: Route to mounted hgnc_mcp server<br/>(direct function call, no proxy)
+
+    Gateway->>HGNCServer: search_genes(query="BRCA", page_size=5)
+    activate HGNCServer
+
+    HGNCServer->>HGNCServer: client = await get_client()
+    HGNCServer->>HGNCServer: await client.search_genes(...)
+
+    Note over HGNCServer: Execute search logic<br/>(alias boost, scoring, pagination)
+
+    HGNCServer-->>Gateway: PaginationEnvelope[SearchCandidate]
+    deactivate HGNCServer
+
+    Gateway-->>User: PaginationEnvelope (JSON)
+    deactivate Gateway
+
+    User->>Gateway: call_tool("chembl_search_compounds", {"query": "aspirin", "page_size": 10})
+    activate Gateway
+
+    Gateway->>ChEMBLServer: search_compounds(query="aspirin", page_size=10)
+    activate ChEMBLServer
+
+    ChEMBLServer->>ChEMBLServer: client = await get_client()
+    ChEMBLServer->>ChEMBLServer: await client.search_compounds(...)
+
+    Note over ChEMBLServer: SDK search with rate limiting<br/>and exponential backoff
+
+    ChEMBLServer-->>Gateway: PaginationEnvelope[CompoundSearchCandidate]
+    deactivate ChEMBLServer
+
+    Gateway-->>User: PaginationEnvelope (JSON)
+    deactivate Gateway
+```
+
+### Explanation
+
+**Gateway Architecture** (`/src/lifesciences_mcp/servers/gateway.py`)
+
+The gateway server uses FastMCP's `mount()` method to compose multiple servers without proxy overhead:
+
+**Server Import and Mounting** (lines 31-109)
+
+1. **Import Phase**: All 12 MCP servers imported as module-level instances
+   ```python
+   from lifesciences_mcp.servers.hgnc import mcp as hgnc_mcp
+   from lifesciences_mcp.servers.uniprot import mcp as uniprot_mcp
+   # ... 10 more servers
+   ```
+
+2. **Gateway Creation**: Single FastMCP instance at module level (line 49)
+   ```python
+   mcp = FastMCP("Life Sciences MCP Gateway")
+   ```
+
+3. **Direct Mounting**: Each server mounted with `as_proxy=False` for direct function calls
+   ```python
+   mcp.mount(hgnc_mcp, prefix="hgnc", as_proxy=False, tool_names={
+       "search_genes": "hgnc_search_genes",
+       "get_gene": "hgnc_get_gene"
+   })
+   ```
+
+**Tool Naming Convention**
+
+All tools prefixed with server name to avoid collisions:
+- HGNC: `hgnc_search_genes`, `hgnc_get_gene`
+- UniProt: `uniprot_search_proteins`, `uniprot_get_protein`
+- ChEMBL: `chembl_search_compounds`, `chembl_get_compound`, `chembl_get_compounds_batch`
+- OpenTargets: `opentargets_search_targets`, `opentargets_get_target`, `opentargets_get_associations`
+- STRING: `string_search_proteins`, `string_get_interactions`, `string_get_network_image_url`
+- BioGRID: `biogrid_search_genes`, `biogrid_get_interactions`
+- Ensembl: `ensembl_search_genes`, `ensembl_get_gene`, `ensembl_get_transcript`
+- Entrez: `entrez_search_genes`, `entrez_get_gene`, `entrez_get_pubmed_links`
+- PubChem: `pubchem_search_compounds`, `pubchem_get_compound`
+- IUPHAR: `iuphar_search_targets`, `iuphar_get_target`, `iuphar_search_ligands`, `iuphar_get_ligand`
+- WikiPathways: `wikipathways_search_pathways`, `wikipathways_get_pathway`, `wikipathways_get_pathways_for_gene`, `wikipathways_get_pathway_components`
+- ClinicalTrials: `clinicaltrials_search_trials`, `clinicaltrials_get_trial`, `clinicaltrials_get_trial_locations`
+
+**Total: 34+ tools across 12 databases**
+
+**Server Lifecycle Management** (ADR-004)
+
+Each individual server uses module-level singleton pattern:
+
+```python
+# Server: /src/lifesciences_mcp/servers/hgnc.py
+_client: HGNCClient | None = None
+
+async def get_client() -> HGNCClient:
+    global _client
+    if _client is None:
+        _client = HGNCClient()
+    return _client
+```
+
+**Rationale:** FastMCP manages lifecycle internally - no cleanup hooks needed. Clients are lazy-initialized and reused across requests for connection pooling.
+
+**DrugBank Exclusion** (line 45-46)
+
+DrugBank server excluded from gateway due to commercial API key requirement:
+```python
+# Note: DrugBank excluded - requires commercial API key
+# from lifesciences_mcp.servers.drugbank import mcp as drugbank_mcp
+```
+
+**Deployment Models**
+
+1. **Individual Servers**: Run standalone for development/testing
+   ```bash
+   uv run fastmcp run src/lifesciences_mcp/servers/hgnc.py
+   ```
+
+2. **Gateway Server**: Single entrypoint for production
+   ```bash
+   uv run fastmcp run src/lifesciences_mcp/servers/gateway.py
+   ```
+
+3. **FastMCP Cloud**: Deploy gateway as single server
+   ```
+   Entrypoint: src/lifesciences_mcp/servers/gateway.py:mcp
+   ```
+
+**Key Components:**
+- Gateway: `/src/lifesciences_mcp/servers/gateway.py` (112 lines)
+- Individual servers: `/src/lifesciences_mcp/servers/*.py` (12 servers, 80-200 lines each)
+- Server architecture: Module-level singleton pattern with lazy client initialization
+
+**Benefits of Direct Mounting:**
+- No proxy overhead (direct function calls)
+- Shared connection pools per client type
+- Unified error handling and response format
+- Single deployment artifact
+- Automatic tool discovery and documentation
+
+## 5. Batch Operations Flow
+
+Batch operations prevent thread pool exhaustion when fetching multiple entities. This is critical for performance when agents need to retrieve many compounds/proteins/genes.
+
+```mermaid
+sequenceDiagram
+    participant Agent
+    participant MCPServer as ChEMBL Server<br/>(chembl.py)
+    participant Client as ChEMBLClient
+    participant SDK as chembl_webresource_client<br/>(synchronous)
+    participant Executor as ThreadPoolExecutor
+    participant API as ChEMBL API
+
+    Note over Agent,API: Scenario: Batch compound lookup (10 compounds)
+
+    Agent->>MCPServer: get_compounds_batch(<br/>  chembl_ids=["CHEMBL:25", "CHEMBL:941", ..., "CHEMBL:100"],<br/>  slim=true<br/>)
+    activate MCPServer
+
+    MCPServer->>Client: await client.get_compounds_batch(chembl_ids, slim)
+    activate Client
+
+    Note over Client: Validate batch size (max 100)
+
+    loop For each CURIE
+        Note over Client: Validate CURIE format<br/>CHEMBL:25 → SDK format CHEMBL25
+    end
+
+    Note over Client: Build SDK ID list:<br/>["CHEMBL25", "CHEMBL941", ..., "CHEMBL100"]
+
+    Note over Client: Prepare batch query function<br/>def sdk_batch_get():<br/>  return list(self._molecule.filter(<br/>    molecule_chembl_id__in=sdk_ids))
+
+    Client->>Client: await self._sdk_call_with_backoff(sdk_batch_get)
+
+    Note over Client: Rate limit check + acquire lock
+
+    Client->>Executor: loop.run_in_executor(executor, sdk_batch_get)
+    activate Executor
+
+    Executor->>SDK: self._molecule.filter(molecule_chembl_id__in=[...])
+    activate SDK
+
+    SDK->>API: POST /molecule.json<br/>{"molecule_chembl_id__in": ["CHEMBL25", "CHEMBL941", ...]}
+    activate API
+    Note over API: Single API call fetches all 10 compounds
+    API-->>SDK: [{molecule_chembl_id: "CHEMBL25", ...}, ...]
+    deactivate API
+
+    SDK-->>Executor: list of 10 compound dicts
+    deactivate SDK
+
+    Executor-->>Client: list[dict[str, Any]] (10 results)
+    deactivate Executor
+
+    Note over Client: Map results by ChEMBL ID
+
+    loop For each requested ID in order
+        alt Compound found
+            Note over Client: Transform to Compound model<br/>Apply slim mode (minimal fields)
+        else Compound not found
+            Note over Client: Add ENTITY_NOT_FOUND error for this ID
+        end
+    end
+
+    Client-->>MCPServer: list[dict[str, Any]]<br/>[<br/>  {id: "CHEMBL:25", name: "Aspirin", ...},<br/>  {id: "CHEMBL:941", name: "Ibuprofen", ...},<br/>  ...<br/>  {success: false, error: {code: "ENTITY_NOT_FOUND", ...}}<br/>]
+    deactivate Client
+
+    MCPServer-->>Agent: list[dict]
+    deactivate MCPServer
+
+    Note over Agent,API: Compare to inefficient approach (10 separate calls)
+
+    Agent->>MCPServer: get_compound("CHEMBL:25")
+    activate MCPServer
+    Note over MCPServer: Request 1/10
+    MCPServer->>Client: ...
+    activate Client
+    Client->>Executor: run_in_executor
+    activate Executor
+    Executor->>SDK: self._molecule.get("CHEMBL25")
+    activate SDK
+    SDK->>API: GET /molecule/CHEMBL25.json
+    activate API
+    API-->>SDK: {...}
+    deactivate API
+    SDK-->>Executor: {...}
+    deactivate SDK
+    Executor-->>Client: {...}
+    deactivate Executor
+    Client-->>MCPServer: Compound
+    deactivate Client
+    MCPServer-->>Agent: Compound
+    deactivate MCPServer
+
+    Note over Agent: Agent would need to repeat 9 more times<br/>= 10 API calls + 10 executor tasks<br/>vs 1 API call + 1 executor task with batch
+```
+
+### Explanation
+
+**Batch Lookup Implementation** (`/src/lifesciences_mcp/clients/chembl.py:588-673`)
+
+**Tool Definition** (`/src/lifesciences_mcp/servers/chembl.py:93-109`)
+
+```python
+@mcp.tool
+async def get_compounds_batch(
+    chembl_ids: list[str], slim: bool = True
+) -> list[dict[str, Any]] | ErrorEnvelope:
+    """Batch lookup for multiple compounds to prevent thread pool exhaustion.
+
+    Use this for bulk operations instead of calling get_compound repeatedly.
+    """
+```
+
+**Batch Processing Steps:**
+
+1. **Size Validation** (line 606-613)
+   ```python
+   if len(chembl_ids) > 100:
+       return ErrorEnvelope(
+           error=ErrorDetail(
+               code=ErrorCode.AMBIGUOUS_QUERY,
+               message="Batch size exceeds maximum of 100",
+               recovery_hint="Split request into batches of 100 or fewer compounds"
+           )
+       )
+   ```
+
+2. **CURIE Validation** (lines 615-630)
+   - Validate each CURIE individually
+   - Convert valid CURIEs to SDK format (CHEMBL:25 → CHEMBL25)
+   - Collect errors for invalid CURIEs in results list
+   - Build mapping: `sdk_id_to_curie["CHEMBL25"] = "CHEMBL:25"`
+
+3. **SDK Batch Call** (lines 636-640)
+   ```python
+   def sdk_batch_get() -> list[dict[str, Any]]:
+       return list(self._molecule.filter(molecule_chembl_id__in=sdk_ids))
+
+   sdk_results = await self._sdk_call_with_backoff(sdk_batch_get)
+   ```
+
+   **Key benefit:** ChEMBL SDK's `filter()` method makes a single API call for all IDs, not N separate calls.
+
+4. **Result Mapping** (lines 642-668)
+   - Create dict mapping ChEMBL ID to result
+   - Iterate through requested IDs in original order
+   - For each ID:
+     - If found: Transform to Compound model, apply slim mode
+     - If not found: Add ENTITY_NOT_FOUND error envelope
+   - Preserve request order in response list
+
+**Slim Mode for Token Efficiency** (`/src/lifesciences_mcp/clients/chembl.py:581-583`)
+
+Batch operations default to `slim=True` to reduce token usage:
+
+```python
+if slim:
+    results.append(compound.to_slim())  # Returns only id, name, molecular_formula
+else:
+    results.append(compound.model_dump())  # Full compound with cross_refs, synonyms
+```
+
+**Performance Comparison:**
+
+| Approach | API Calls | Executor Tasks | Latency | Tokens |
+|----------|-----------|----------------|---------|--------|
+| Individual get_compound (10x) | 10 | 10 | ~10s | ~1000-3000 |
+| Batch get_compounds_batch | 1 | 1 | ~1s | ~200-600 (slim) |
+
+**Thread Pool Exhaustion Prevention**
+
+Without batch operations, an agent fetching 100 compounds would:
+- Make 100 sequential API calls
+- Spawn 100 executor tasks (synchronous SDK wrapper)
+- Risk thread pool exhaustion (default max 32-36 threads)
+- Take ~100 seconds (rate limited to 10 req/s)
+
+With batch operations:
+- Make 1 API call (or 2 if splitting at batch_size=100)
+- Spawn 1-2 executor tasks
+- Complete in ~1-2 seconds
+- Reduce token usage by 50-80% with slim mode
+
+**Other Batch-Capable Servers:**
+
+Currently only ChEMBL implements batch operations. Potential candidates for future batch support:
+- UniProt: Batch protein lookup
+- HGNC: Batch gene lookup
+- PubChem: Batch compound lookup
+- Ensembl: Batch gene/transcript lookup
+
+**Key Components:**
+- ChEMBL batch tool: `/src/lifesciences_mcp/servers/chembl.py:93-109`
+- ChEMBL batch client: `/src/lifesciences_mcp/clients/chembl.py:588-673`
+- Compound model: `/src/lifesciences_mcp/models/compound.py` (with to_slim() method)
+
+## 6. Cross-Database Navigation Flow
+
+Cross-references enable seamless navigation across the 12 life sciences databases. This is the foundation for multi-database workflows like "Find all proteins for gene BRCA1, then find compounds targeting those proteins."
+
+```mermaid
+sequenceDiagram
+    participant Agent
+    participant HGNC as HGNC Server
+    participant UniProt as UniProt Server
+    participant ChEMBL as ChEMBL Server
+    participant OpenTargets as Open Targets Server
+
+    Note over Agent,OpenTargets: Use Case: Gene → Protein → Compound → Target workflow
+
+    Agent->>HGNC: search_genes(query="BRCA1", page_size=5)
+    activate HGNC
+    HGNC-->>Agent: PaginationEnvelope[SearchCandidate]<br/>{items: [{id: "HGNC:1100", symbol: "BRCA1", score: 1.0}]}
+    deactivate HGNC
+
+    Agent->>HGNC: get_gene(hgnc_id="HGNC:1100")
+    activate HGNC
+    HGNC-->>Agent: Gene {<br/>  id: "HGNC:1100",<br/>  symbol: "BRCA1",<br/>  name: "BRCA1 DNA repair associated",<br/>  cross_references: {<br/>    ensembl_gene: "ENSG00000012048",<br/>    uniprot: ["P38398"],<br/>    entrez: "672",<br/>    refseq: ["NM_007294"],<br/>    omim: "113705"<br/>  }<br/>}
+    deactivate HGNC
+
+    Note over Agent: Extract UniProt ID from cross_references<br/>uniprot_id = "UniProtKB:P38398"
+
+    Agent->>UniProt: get_protein(uniprot_id="UniProtKB:P38398")
+    activate UniProt
+    UniProt-->>Agent: Protein {<br/>  id: "UniProtKB:P38398",<br/>  gene_names: ["BRCA1"],<br/>  protein_name: "Breast cancer type 1 susceptibility protein",<br/>  function: "E3 ubiquitin-protein ligase...",<br/>  cross_references: {<br/>    hgnc: "HGNC:1100",<br/>    ensembl_gene: "ENSG00000012048",<br/>    ensembl_transcript: ["ENST00000357654"],<br/>    entrez: "672",<br/>    pdb: ["1JM7", "1N5O", "1T15", ...],<br/>    string: "9606.ENSP00000350283"<br/>  }<br/>}
+    deactivate UniProt
+
+    Note over Agent: Extract STRING ID from cross_references<br/>string_id = "STRING:9606.ENSP00000350283"
+
+    Agent->>Agent: get_interactions(string_id="STRING:9606.ENSP00000350283", limit=10)
+    Note over Agent: Get protein-protein interactions<br/>(omitted for brevity)
+
+    Note over Agent: Navigate to ChEMBL to find compounds<br/>targeting BRCA1
+
+    Agent->>ChEMBL: search_compounds(query="BRCA1 inhibitor", page_size=10)
+    activate ChEMBL
+    ChEMBL-->>Agent: PaginationEnvelope[CompoundSearchCandidate]<br/>{items: [<br/>  {id: "CHEMBL:3707442", name: "Olaparib", score: 0.95},<br/>  {id: "CHEMBL:2109743", name: "Rucaparib", score: 0.90}<br/>]}
+    deactivate ChEMBL
+
+    Agent->>ChEMBL: get_compound(chembl_id="CHEMBL:3707442")
+    activate ChEMBL
+    ChEMBL-->>Agent: Compound {<br/>  id: "CHEMBL:3707442",<br/>  name: "Olaparib",<br/>  molecular_formula: "C24H23FN4O3",<br/>  smiles: "CC(C)(C)C(=O)NC1=CC(=C(C=C1)OCC2=CC=C(C=C2)F)C(=O)N3CCN(CC3)C(=O)C4=CC=CC=C4",<br/>  max_phase: 4,<br/>  indications: ["Ovarian cancer", "Breast cancer"],<br/>  cross_references: {<br/>    chembl: ["CHEMBL:3707442"],<br/>    pubchem_compound: ["23725625"],<br/>    drugbank: ["DB:09074"]<br/>  }<br/>}
+    deactivate ChEMBL
+
+    Note over Agent: Navigate to Open Targets to verify<br/>target-disease associations
+
+    Agent->>OpenTargets: get_associations(<br/>  target_id="ENSG00000012048",<br/>  disease_id="EFO:0000305",<br/>  limit=10<br/>)
+    activate OpenTargets
+    OpenTargets-->>Agent: AssociationEnvelope {<br/>  items: [<br/>    {target_symbol: "BRCA1",<br/>     disease_name: "breast carcinoma",<br/>     overall_score: 0.95,<br/>     evidence_count: 1234,<br/>     clinical_evidence: true}<br/>  ]<br/>}
+    deactivate OpenTargets
+
+    Note over Agent: Complete workflow:<br/>Gene (HGNC) → Protein (UniProt) → Compound (ChEMBL) → Disease (Open Targets)<br/><br/>Agent discovered:<br/>- BRCA1 gene (HGNC:1100)<br/>- BRCA1 protein (UniProtKB:P38398)<br/>- Olaparib compound (CHEMBL:3707442)<br/>- Breast cancer association (EFO:0000305)<br/><br/>All linked via cross-references!
+```
+
+### Explanation
+
+**22-Key Cross-Reference Registry** (`/src/lifesciences_mcp/models/gene.py:27-143`)
+
+The CrossReferences model defines a standardized registry of 22 database identifier keys:
+
+**Core Identifiers:**
+- `ensembl_gene`: Ensembl gene ID (e.g., ENSG00000012048)
+- `ensembl_transcript`: Ensembl transcript IDs (list)
+- `uniprot`: UniProt accessions (list)
+- `entrez`: NCBI Entrez gene ID
+- `refseq`: RefSeq accessions (list)
+- `hgnc`: HGNC gene ID
+
+**Disease/Phenotype:**
+- `omim`: OMIM ID
+- `orphanet`: Orphanet rare disease ID
+- `mondo`: MONDO disease ontology ID
+- `efo`: Experimental Factor Ontology ID
+
+**Drug/Compound:**
+- `chembl`: ChEMBL target/compound ID
+- `drugbank`: DrugBank ID
+- `pubchem_compound`: PubChem compound ID
+- `pubchem_substance`: PubChem substance ID
+
+**Pathway:**
+- `kegg`: KEGG gene ID
+- `kegg_pathway`: KEGG pathway IDs (list)
+
+**Interaction:**
+- `string`: STRING protein ID
+- `biogrid`: BioGRID gene ID
+- `stitch`: STITCH chemical-protein interaction ID
+- `iuphar`: IUPHAR/GtoPdb ligand or target ID
+
+**Structural:**
+- `pdb`: Protein Data Bank IDs (list)
+
+**Omit-if-Null Pattern** (`/src/lifesciences_mcp/models/gene.py:130-142`)
+
+Cross-references follow the "omit keys with no value" principle:
+
+```python
+@model_validator(mode="after")
+def omit_empty_values(self) -> "CrossReferences":
+    """Ensure no empty strings or empty lists are stored (omit instead)."""
+    for field_name in type(self).model_fields:
+        value = getattr(self, field_name)
+        if value == "" or value == []:
+            setattr(self, field_name, None)
+    return self
+
+def model_dump(self, **kwargs) -> dict:
+    """Override to exclude None values (ADR-001: omit keys with no value)."""
+    kwargs.setdefault("exclude_none", True)
+    return super().model_dump(**kwargs)
+```
+
+**Result:** JSON responses only include keys that have values, reducing token usage.
+
+**Cross-Reference Building Examples:**
+
+**HGNC Client** (`/src/lifesciences_mcp/clients/hgnc.py:333-344`)
+```python
+def _build_cross_references(self, doc: dict[str, Any]) -> CrossReferences:
+    return CrossReferences(
+        ensembl_gene=doc.get("ensembl_gene_id"),
+        uniprot=doc.get("uniprot_ids") or None,
+        entrez=doc.get("entrez_id"),
+        refseq=doc.get("refseq_accession") or None,
+        omim=self._extract_omim(doc.get("omim_id")),
+    )
+```
+
+**ChEMBL Client** (`/src/lifesciences_mcp/clients/chembl.py:286-329`)
+```python
+def _build_cross_references(self, sdk_result: dict[str, Any]) -> dict[str, list[str]]:
+    xrefs: dict[str, list[str]] = {}
+
+    # Add self-reference
+    raw_id = sdk_result.get("molecule_chembl_id")
+    if raw_id:
+        xrefs["chembl"] = [f"CHEMBL:{numeric_part}"]
+
+    # Process cross_references array from ChEMBL API
+    for xref in sdk_result.get("cross_references", []):
+        xref_name = xref.get("xref_name")  # e.g., "UniProt", "PubChem"
+        xref_id = xref.get("xref_id")
+
+        registry_key = XREF_MAPPING.get(xref_name)  # Map to our 22-key registry
+        if registry_key:
+            normalized_id = self._normalize_xref_id(registry_key, xref_id)
+            xrefs[registry_key].append(normalized_id)
+
+    return xrefs
+```
+
+**Navigation Patterns:**
+
+1. **Gene → Protein**
+   ```python
+   gene = await hgnc_client.get_gene("HGNC:1100")
+   uniprot_ids = gene.cross_references.uniprot  # ["P38398"]
+   protein = await uniprot_client.get_protein(f"UniProtKB:{uniprot_ids[0]}")
+   ```
+
+2. **Protein → Gene**
+   ```python
+   protein = await uniprot_client.get_protein("UniProtKB:P38398")
+   hgnc_id = protein.cross_references.hgnc  # "HGNC:1100"
+   gene = await hgnc_client.get_gene(hgnc_id)
+   ```
+
+3. **Gene → Ensembl → Transcript**
+   ```python
+   gene = await hgnc_client.get_gene("HGNC:1100")
+   ensembl_gene_id = gene.cross_references.ensembl_gene  # "ENSG00000012048"
+   ensembl_gene = await ensembl_client.get_gene(ensembl_gene_id)
+   transcript_ids = ensembl_gene.transcripts  # ["ENST00000357654", ...]
+   ```
+
+4. **Protein → Structure (PDB)**
+   ```python
+   protein = await uniprot_client.get_protein("UniProtKB:P38398")
+   pdb_ids = protein.cross_references.pdb  # ["1JM7", "1N5O", "1T15", ...]
+   # Could fetch 3D structures from PDB (not implemented as MCP server yet)
+   ```
+
+5. **Compound → Target Associations**
+   ```python
+   compound = await chembl_client.get_compound("CHEMBL:3707442")
+   # Use compound name to search targets
+   targets = await opentargets_client.search_targets(query=compound.name)
+   ```
+
+**Multi-Database Workflow Example:**
+
+Complete drug repurposing workflow using cross-references:
+
+```python
+# 1. Start with disease
+disease = "breast cancer"
+
+# 2. Find associated genes via Open Targets
+associations = await opentargets_client.get_associations(disease_id="EFO:0000305", limit=10)
+top_target = associations.items[0]  # Gene with strongest association
+
+# 3. Get gene details from HGNC
+gene = await hgnc_client.get_gene(f"HGNC:{top_target.target_id}")
+
+# 4. Navigate to protein via cross-reference
+protein = await uniprot_client.get_protein(f"UniProtKB:{gene.cross_references.uniprot[0]}")
+
+# 5. Find protein interactions via STRING
+interactions = await string_client.get_interactions(protein.cross_references.string, limit=20)
+
+# 6. Search for compounds targeting this protein
+compounds = await chembl_client.search_compounds(query=f"{gene.symbol} inhibitor", page_size=20)
+
+# 7. Get compound details with drug approval status
+for candidate in compounds.items:
+    compound = await chembl_client.get_compound(candidate.id)
+    if compound.max_phase == 4:  # FDA approved
+        print(f"Approved drug: {compound.name} for {disease}")
+```
+
+**Key Components:**
+- Cross-reference models: `/src/lifesciences_mcp/models/gene.py`, `/src/lifesciences_mcp/models/protein.py`, `/src/lifesciences_mcp/models/compound.py`
+- 22-key registry: Defined in ADR-001 v1.2, implemented across all models
+- Client cross-ref building: All clients implement `_build_cross_references()` method
+
+**Benefits:**
+- **Discoverability**: Agents can traverse database boundaries autonomously
+- **Token Efficiency**: Omit-if-null pattern reduces response size
+- **Standardization**: 22-key registry ensures consistency across all servers
+- **Validation**: Pydantic models with regex patterns prevent invalid cross-references
+
+## 7. Aggregated Search Flow (Experimental)
+
+The UnifiedSearch aggregator demonstrates experimental cross-database query orchestration with result re-ranking. This pattern enables "fuzzy-to-fact" across multiple databases simultaneously.
+
+```mermaid
+sequenceDiagram
+    participant Agent
+    participant Aggregator as UnifiedSearch<br/>(aggregator.py)
+    participant HGNC as HGNCClient
+    participant UniProt as UniProtClient
+    participant OpenTargets as OpenTargetsClient
+
+    Note over Agent,OpenTargets: Experimental: Multi-database entity resolution
+
+    Agent->>Aggregator: aggregator = UnifiedSearch()
+    activate Aggregator
+
+    Note over Aggregator: Initialize clients<br/>self.hgnc = HGNCClient()<br/>self.uniprot = UniProtClient()<br/>self.opentargets = OpenTargetsClient()
+
+    Aggregator-->>Agent: UnifiedSearch instance
+    deactivate Aggregator
+
+    Agent->>Aggregator: await aggregator.search(query="p53", limit=10)
+    activate Aggregator
+
+    Note over Aggregator: Phase 1: Query multiple databases
+
+    Aggregator->>HGNC: await self.hgnc.search_genes(query="p53")
+    activate HGNC
+
+    Note over HGNC: Fuzzy search with alias boost<br/>"p53" → TP53 (score=1.0)
+
+    HGNC-->>Aggregator: PaginationEnvelope[SearchCandidate]<br/>{items: [<br/>  {id: "HGNC:11998", symbol: "TP53", score: 1.0},<br/>  {id: "HGNC:19373", symbol: "TP53AP1", score: 0.95},<br/>  {id: "HGNC:30756", symbol: "TP53TG1", score: 0.90}<br/>], total_count: 3}
+    deactivate HGNC
+
+    Note over Aggregator: Collect candidates from HGNC<br/>candidates = results_hgnc.items
+
+    Note over Aggregator: Future: Could query UniProt, Open Targets<br/>for additional candidates
+
+    Note over Aggregator: Phase 2: Re-rank results
+
+    loop For each candidate
+        Note over Aggregator: Calculate rank score:<br/>base_score = candidate.score<br/><br/>Boost exact symbol match:<br/>if symbol.upper() == "P53": score += 2.0<br/><br/>Boost known alias (p53 → TP53):<br/>if query == "P53" and symbol == "TP53": score += 2.0
+    end
+
+    Note over Aggregator: Scoring example:<br/>TP53: 1.0 + 2.0 (alias) = 3.0<br/>TP53AP1: 0.95 (no boost) = 0.95<br/>TP53TG1: 0.90 (no boost) = 0.90
+
+    Note over Aggregator: Sort by boosted score descending
+
+    Note over Aggregator: Slice to limit (10 results)
+
+    Aggregator-->>Agent: PaginationEnvelope[SearchCandidate]<br/>{items: [<br/>  {id: "HGNC:11998", symbol: "TP53", score: 3.0},<br/>  {id: "HGNC:19373", symbol: "TP53AP1", score: 0.95},<br/>  {id: "HGNC:30756", symbol: "TP53TG1", score: 0.90}<br/>], total_count: 3, page_size: 10, cursor: null}
+    deactivate Aggregator
+
+    Note over Agent,OpenTargets: Use Case: Resolve ambiguous term "p53"
+
+    Agent->>Aggregator: await aggregator.search(query="p53", limit=5)
+    activate Aggregator
+
+    Aggregator->>HGNC: search_genes("p53")
+    activate HGNC
+    HGNC-->>Aggregator: PaginationEnvelope (TP53 first)
+    deactivate HGNC
+
+    Note over Aggregator: Re-rank with heuristics
+
+    Aggregator-->>Agent: PaginationEnvelope<br/>(TP53 score=3.0, highly confident)
+    deactivate Aggregator
+
+    Note over Agent: Agent selects top candidate:<br/>resolved_id = "HGNC:11998" (TP53)
+
+    Agent->>Agent: get_gene("HGNC:11998")
+    Note over Agent: Continue with strict lookup
+```
+
+### Explanation
+
+**Aggregator Architecture** (`/src/lifesciences_agent/aggregator.py`)
+
+The UnifiedSearch class orchestrates queries across multiple databases for improved entity resolution:
+
+**Initialization** (lines 25-28)
+```python
+def __init__(self):
+    self.hgnc = HGNCClient()
+    self.uniprot = UniProtClient()
+    self.opentargets = OpenTargetsClient()
+```
+
+**Search Method** (lines 30-73)
+
+The search method implements a 2-phase process:
+
+**Phase 1: Multi-Database Query** (lines 34-40)
+```python
+# 1. Run queries
+# We rely on HGNC search returning a decent pool (default 50)
+results_hgnc = await self.hgnc.search_genes(query)
+
+candidates = []
+if results_hgnc.items:
+    candidates.extend(results_hgnc.items)
+```
+
+Currently only queries HGNC. Future enhancements could add:
+- UniProt search for protein-centric queries
+- Open Targets search for disease-related queries
+- Merge and deduplicate results across databases
+
+**Phase 2: Re-Ranking Logic** (lines 42-61)
+
+Applies heuristics to boost relevance scores:
+
+```python
+normalized_query = query.strip().upper()
+
+def calculate_rank_score(item: SearchCandidate) -> float:
+    score = item.score
+
+    # Boost exact symbol match
+    if item.symbol.upper() == normalized_query:
+        score += 2.0
+
+    # Boost specific known alias "p53" -> "TP53"
+    if normalized_query == "P53" and item.symbol == "TP53":
+        score += 2.0
+
+    return score
+
+# Sort by boosted score descending
+candidates.sort(key=calculate_rank_score, reverse=True)
+```
+
+**Scoring Examples:**
+
+Query: "p53"
+- TP53: base=1.0, alias_boost=2.0 → final=3.0
+- TP53AP1: base=0.95 → final=0.95
+- TP53TG1: base=0.90 → final=0.90
+
+Query: "TP53"
+- TP53: base=1.0, exact_match_boost=2.0 → final=3.0
+- TP53AP1: base=0.95 → final=0.95
+
+**Pagination** (lines 63-73)
+
+```python
+# 3. Slice to limit
+final_items = candidates[:limit]
+
+# Return new envelope
+return PaginationEnvelope.create(
+    items=final_items,
+    total_count=len(candidates),
+    page_size=limit,
+    cursor=None
 )
-# → ValidationError: "Invalid HGNC CURIE format"
 ```
 
-### Key Code References
+**Experimental Status**
 
-- **Function signatures**: `src/lifesciences_mcp/servers/hgnc.py` (lines 37-64) - Type-annotated parameters for auto-validation
-- **PaginationEnvelope model**: `src/lifesciences_mcp/models/envelopes.py` (lines 119-144) - Generic envelope with type parameter
-- **SearchCandidate model**: `src/lifesciences_mcp/models/gene.py` (lines 145-164) - Field validators and CURIE pattern
-- **CURIE validation**: `src/lifesciences_mcp/models/gene.py` (lines 156-163) - @field_validator with regex
-- **Envelope creation**: `src/lifesciences_mcp/models/envelopes.py` (lines 128-144) - Factory method for consistent construction
-- **Model serialization**: `src/lifesciences_mcp/models/gene.py` (lines 139-142) - model_dump() with exclude_none
+This aggregator is a **prototype** demonstrating:
+1. Multi-database orchestration patterns
+2. Cross-database result merging
+3. Heuristic-based re-ranking
+4. Entity resolution for ambiguous terms
 
----
+**Not used in production** - Individual servers handle single-database queries. The pattern could be extended for:
+- Cross-database synonym resolution
+- Confidence scoring across databases
+- Unified search interface for agents
+- Disambiguation workflows
 
-## Cross-Cutting Concerns
+**Limitations:**
 
-### Error Handling Flow
+1. **Hard-coded heuristics**: Alias boosting is specific to "p53" → "TP53"
+   - Should use database alias tables dynamically
 
-```mermaid
-sequenceDiagram
-    participant Client as MCP Client
-    participant Server as MCP Server
-    participant DomainClient as Domain Client<br/>(e.g., HGNCClient)
-    participant API as External API
+2. **Single database**: Currently only queries HGNC
+   - Could extend to query UniProt, Open Targets simultaneously
 
-    Note over Client,API: Error Propagation Chain
+3. **No deduplication**: If querying multiple databases, would need entity matching
+   - Example: HGNC "TP53" vs UniProt "P04637" (same gene)
 
-    rect rgb(255, 245, 245)
-        Note over Client,API: Scenario 1: Invalid CURIE Format
-        Client->>+Server: get_gene("BRCA1")
-        Note right of Client: Raw string instead<br/>of CURIE format
+4. **No cross-reference validation**: Doesn't verify cross-references exist
+   - Could boost candidates that appear in multiple databases
 
-        Server->>+DomainClient: get_gene("BRCA1")
-        DomainClient->>DomainClient: Validate CURIE:<br/>HGNC_CURIE_PATTERN.match("BRCA1")
-        Note right of DomainClient: Regex: ^HGNC:\d+$<br/>Match fails ✗
+**Future Enhancements:**
 
-        DomainClient->>DomainClient: Build ErrorEnvelope:<br/>ErrorEnvelope.unresolved_entity(<br/> invalid_input="BRCA1"<br/>)
-
-        DomainClient-->>-Server: ErrorEnvelope {<br/> success: false,<br/> error: {<br/>  code: "UNRESOLVED_ENTITY",<br/>  message: "...",<br/>  recovery_hint: "Call search_genes...",<br/>  invalid_input: "BRCA1"<br/> }<br/>}
-
-        Server-->>-Client: ErrorEnvelope (JSON)
-
-        Note over Client: Agent reads recovery_hint<br/>and calls search_genes<br/>to resolve identifier
-    end
-
-    rect rgb(255, 250, 240)
-        Note over Client,API: Scenario 2: Entity Not Found
-        Client->>+Server: get_gene("HGNC:99999999")
-        Note right of Client: Valid CURIE format<br/>but doesn't exist
-
-        Server->>+DomainClient: get_gene("HGNC:99999999")
-        DomainClient->>DomainClient: Validate CURIE ✓
-        DomainClient->>+API: GET /fetch/hgnc_id/99999999
-        API-->>-DomainClient: 200 OK {response: {docs: []}}
-        Note right of API: Empty docs array
-
-        DomainClient->>DomainClient: Check: len(docs) == 0
-        DomainClient->>DomainClient: Build ErrorEnvelope:<br/>ErrorEnvelope.entity_not_found(<br/> hgnc_id="HGNC:99999999"<br/>)
-
-        DomainClient-->>-Server: ErrorEnvelope {<br/> error: {<br/>  code: "ENTITY_NOT_FOUND",<br/>  message: "No gene found...",<br/>  recovery_hint: "Verify the HGNC ID...",<br/>  invalid_input: "HGNC:99999999"<br/> }<br/>}
-
-        Server-->>-Client: ErrorEnvelope (JSON)
-    end
-
-    rect rgb(245, 245, 255)
-        Note over Client,API: Scenario 3: Rate Limited
-        Client->>+Server: search_genes("TP53")
-        Server->>+DomainClient: search_genes("TP53")
-        DomainClient->>+API: GET /search/TP53
-        API-->>-DomainClient: 429 Too Many Requests<br/>Retry-After: 10
-
-        DomainClient->>DomainClient: Exponential backoff:<br/>attempt 1/3
-        DomainClient->>DomainClient: await asyncio.sleep(10)
-        DomainClient->>+API: GET /search/TP53 (retry)
-        API-->>-DomainClient: 429 Too Many Requests
-
-        DomainClient->>DomainClient: Exponential backoff:<br/>attempt 2/3
-        DomainClient->>DomainClient: await asyncio.sleep(20)
-        DomainClient->>+API: GET /search/TP53 (retry)
-        API-->>-DomainClient: 429 Too Many Requests
-
-        Note over DomainClient: Max retries exhausted
-
-        DomainClient->>DomainClient: Build ErrorEnvelope:<br/>ErrorEnvelope.rate_limited(<br/> retry_after=10<br/>)
-
-        DomainClient-->>-Server: ErrorEnvelope {<br/> error: {<br/>  code: "RATE_LIMITED",<br/>  message: "...",<br/>  recovery_hint: "Retry after 10 seconds"<br/> }<br/>}
-
-        Server-->>-Client: ErrorEnvelope (JSON)
-    end
-
-    rect rgb(245, 255, 245)
-        Note over Client,API: Scenario 4: Upstream Error
-        Client->>+Server: get_gene("HGNC:1100")
-        Server->>+DomainClient: get_gene("HGNC:1100")
-        DomainClient->>+API: GET /fetch/hgnc_id/1100
-        API-->>-DomainClient: 503 Service Unavailable
-
-        DomainClient->>DomainClient: Build ErrorEnvelope:<br/>ErrorEnvelope.upstream_error(<br/> status_code=503<br/>)
-
-        DomainClient-->>-Server: ErrorEnvelope {<br/> error: {<br/>  code: "UPSTREAM_ERROR",<br/>  message: "HGNC API returned error 503",<br/>  recovery_hint: "Retry later"<br/> }<br/>}
-
-        Server-->>-Client: ErrorEnvelope (JSON)
-    end
-```
-
-**Error Code Registry:**
-
-| Error Code | Trigger | Recovery Hint | Example |
-|---|---|---|---|
-| `UNRESOLVED_ENTITY` | Invalid CURIE format passed to strict tool | Call search tool first to resolve identifier | User passes "BRCA1" instead of "HGNC:1100" |
-| `ENTITY_NOT_FOUND` | Valid CURIE but record doesn't exist | Verify ID format or try synonym search | "HGNC:99999999" doesn't exist |
-| `AMBIGUOUS_QUERY` | Too many/few results or query too short | Refine query with more specific terms | Query "p" returns 1000+ results |
-| `RATE_LIMITED` | Exceeded API rate limit | Retry after N seconds | 429 response from upstream |
-| `UPSTREAM_ERROR` | API failure, network error, timeout | Retry later or check connectivity | 503, timeout, connection refused |
-| `INVALID_CROSS_REFERENCE` | Cross-ref ID fails validation | Verify format in source database | "ENSG123" fails Ensembl pattern |
-
-**Key Design Decisions:**
-
-1. **All errors use ErrorEnvelope**: No raw exceptions escape to client - always wrapped
-2. **Recovery hints are actionable**: Guide agent to next step (e.g., "Call search_genes first")
-3. **Distinguish UNRESOLVED vs NOT_FOUND**: Different semantic meanings and recovery paths
-4. **Preserve invalid_input**: Client can inspect what caused error for debugging
-5. **Exponential backoff**: 3 retries with 2^attempt delay for rate limits (lines 85-108 in hgnc.py)
-
-**Code References:**
-- Error envelope factory methods: `src/lifesciences_mcp/models/envelopes.py` (lines 46-108)
-- CURIE validation: `src/lifesciences_mcp/clients/hgnc.py` (lines 283-284)
-- Rate limit handling: `src/lifesciences_mcp/clients/hgnc.py` (lines 62-108)
-- Upstream error mapping: `src/lifesciences_mcp/clients/hgnc.py` (lines 162-166, 292-297)
-
----
-
-### Pagination Flow
-
-```mermaid
-sequenceDiagram
-    participant Client as MCP Client
-    participant Server as MCP Server
-    participant DomainClient as Domain Client
-    participant API as External API
-
-    Note over Client,API: Initial Page Request
-
-    rect rgb(245, 250, 255)
-        Client->>+Server: search_genes(query="kinase",<br/>page_size=50)
-        Note right of Client: No cursor =<br/>first page
-
-        Server->>+DomainClient: search_genes(<br/>query="kinase",<br/>cursor=None,<br/>page_size=50)
-
-        DomainClient->>DomainClient: Decode cursor:<br/>cursor is None → offset=0
-
-        DomainClient->>+API: GET /search/kinase
-        API-->>-DomainClient: {docs: [...200 results...],<br/>numFound: 200}
-
-        DomainClient->>DomainClient: Apply client-side pagination:<br/>page_start = 0<br/>page_end = 50<br/>page_items = results[0:50]
-
-        DomainClient->>DomainClient: Calculate next cursor:<br/>next_offset = 50<br/>cursor_data = {"offset": 50}<br/>next_cursor = base64(JSON(cursor_data))
-        Note right of DomainClient: Cursor encodes offset<br/>for stateless pagination
-
-        DomainClient->>DomainClient: Build PaginationEnvelope:<br/>PaginationEnvelope.create(<br/> items=page_items,<br/> cursor="eyJvZmZzZXQiOiA1MH0=",<br/> total_count=200,<br/> page_size=50<br/>)
-
-        DomainClient-->>-Server: PaginationEnvelope {<br/> items: [...50 items...],<br/> pagination: {<br/>  cursor: "eyJvZmZzZXQiOiA1MH0=",<br/>  total_count: 200,<br/>  page_size: 50<br/> }<br/>}
-
-        Server-->>-Client: PaginationEnvelope (JSON)
-
-        Note over Client: Client displays:<br/>Showing 1-50 of 200 results
-    end
-
-    Note over Client,API: Second Page Request
-
-    rect rgb(250, 255, 245)
-        Client->>+Server: search_genes(<br/>query="kinase",<br/>cursor="eyJvZmZzZXQiOiA1MH0=",<br/>page_size=50)
-        Note right of Client: Pass cursor from<br/>previous response
-
-        Server->>+DomainClient: search_genes(<br/>cursor="eyJvZmZzZXQiOiA1MH0=",<br/>page_size=50)
-
-        DomainClient->>DomainClient: Decode cursor:<br/>base64_decode("eyJ...") →<br/>{"offset": 50}<br/>offset = 50
-
-        DomainClient->>+API: GET /search/kinase
-        Note right of API: Same query,<br/>client-side slicing
-        API-->>-DomainClient: {docs: [...200 results...]}
-
-        DomainClient->>DomainClient: Apply pagination:<br/>page_start = 50<br/>page_end = 100<br/>page_items = results[50:100]
-
-        DomainClient->>DomainClient: Calculate next cursor:<br/>next_offset = 100<br/>cursor_data = {"offset": 100}<br/>next_cursor = base64(JSON(cursor_data))
-
-        DomainClient->>DomainClient: Build PaginationEnvelope:<br/>cursor="eyJvZmZzZXQiOiAxMDB9",<br/>total_count=200
-
-        DomainClient-->>-Server: PaginationEnvelope {<br/> items: [...50 items...],<br/> pagination: {<br/>  cursor: "eyJvZmZzZXQiOiAxMDB9",<br/>  total_count: 200,<br/>  page_size: 50<br/> }<br/>}
-
-        Server-->>-Client: PaginationEnvelope (JSON)
-
-        Note over Client: Showing 51-100 of 200
-    end
-
-    Note over Client,API: Final Page Request
-
-    rect rgb(255, 250, 245)
-        Client->>+Server: search_genes(<br/>query="kinase",<br/>cursor="eyJvZmZzZXQiOiAxNTB9",<br/>page_size=50)
-
-        Server->>+DomainClient: search_genes(cursor="...")
-        DomainClient->>DomainClient: Decode: offset = 150
-        DomainClient->>+API: GET /search/kinase
-        API-->>-DomainClient: {docs: [...200 results...]}
-
-        DomainClient->>DomainClient: Apply pagination:<br/>page_start = 150<br/>page_end = 200<br/>page_items = results[150:200]
-
-        DomainClient->>DomainClient: Calculate next cursor:<br/>next_offset = 200<br/>200 >= total_count (200)<br/>→ next_cursor = None
-        Note right of DomainClient: cursor=None signals<br/>end of results
-
-        DomainClient->>DomainClient: Build PaginationEnvelope:<br/>cursor=None
-
-        DomainClient-->>-Server: PaginationEnvelope {<br/> items: [...50 items...],<br/> pagination: {<br/>  cursor: null,<br/>  total_count: 200,<br/>  page_size: 50<br/> }<br/>}
-
-        Server-->>-Client: PaginationEnvelope (JSON)
-
-        Note over Client: Showing 151-200 of 200<br/>(no more pages)
-    end
-```
-
-**Pagination Strategies by Database:**
-
-| Database | Strategy | Cursor Format | Total Count Available? |
-|---|---|---|---|
-| HGNC | Client-side slicing | `{"offset": N}` | Yes (numFound) |
-| UniProt | Server-side (API cursor) | Opaque string from API | No |
-| ChEMBL | Client-side slicing | `{"offset": N}` | Yes (result count) |
-| Ensembl | Client-side slicing | `{"offset": N}` | Yes (result count) |
-
-**Key Design Decisions:**
-
-1. **Opaque cursors**: Base64-encoded JSON prevents clients from manipulating offset
-2. **Stateless pagination**: Cursor contains all state needed (no server-side session)
-3. **cursor=null signals end**: Client knows when to stop requesting pages
-4. **total_count optional**: Some APIs (UniProt) don't provide it
-5. **Client-side slicing for HGNC**: API doesn't support pagination, so client buffers results
-
-**Cursor Structure:**
 ```python
-# Before encoding
-cursor_data = {
-    "offset": 50,
-    "query_hash": "abc123"  # Optional: verify cursor matches original query
-}
+async def search(self, query: str, limit: int = 10) -> PaginationEnvelope[SearchCandidate]:
+    # Query multiple databases in parallel
+    results_hgnc, results_uniprot, results_opentargets = await asyncio.gather(
+        self.hgnc.search_genes(query),
+        self.uniprot.search_proteins(query),
+        self.opentargets.search_targets(query)
+    )
 
-# After base64 encoding
-cursor = "eyJvZmZzZXQiOiA1MCwgInF1ZXJ5X2hhc2giOiAiYWJjMTIzIn0="
+    # Merge and deduplicate by cross-references
+    candidates = self._merge_candidates(
+        results_hgnc.items,
+        results_uniprot.items,
+        results_opentargets.items
+    )
+
+    # Re-rank with cross-database confidence
+    candidates = self._rerank_with_confidence(candidates)
+
+    return PaginationEnvelope.create(items=candidates[:limit], ...)
 ```
 
-**Code References:**
-- Cursor encoding: `src/lifesciences_mcp/clients/hgnc.py` (lines 240-241)
-- Cursor decoding: `src/lifesciences_mcp/clients/hgnc.py` (lines 147-152)
-- Client-side pagination: `src/lifesciences_mcp/clients/hgnc.py` (lines 232-241)
-- UniProt server-side: `src/lifesciences_mcp/clients/uniprot.py` (lines 279-286) - Uses API's cursor directly
-- Pagination model: `src/lifesciences_mcp/models/envelopes.py` (lines 111-127)
+**Key Components:**
+- Aggregator: `/src/lifesciences_agent/aggregator.py` (74 lines)
+- Client dependencies: HGNCClient, UniProtClient, OpenTargetsClient
+- Models: SearchCandidate, PaginationEnvelope
 
----
+**Use Cases:**
+- Resolve ambiguous biological terms (e.g., "p53", "insulin", "cancer")
+- Cross-validate entity existence across databases
+- Confidence scoring for entity resolution
+- Experimental agentic search patterns
 
-### Cross-Reference Resolution Flow
+## 8. Session Lifecycle and Connection Management
+
+The system uses module-level singletons with lazy initialization for efficient connection pooling and lifecycle management.
 
 ```mermaid
 sequenceDiagram
-    participant Agent as AI Agent
-    participant Gateway as Gateway Server
-    participant HGNC_C as HGNC Client
-    participant UniProt_C as UniProt Client
-    participant Ensembl_C as Ensembl Client
-    participant API_H as HGNC API
-    participant API_U as UniProt API
-    participant API_E as Ensembl API
+    participant FastMCP as FastMCP Runtime
+    participant Server as MCP Server<br/>(e.g., hgnc.py)
+    participant GetClient as get_client()<br/>(module function)
+    participant Client as HGNCClient<br/>(singleton)
+    participant HTTPClient as httpx.AsyncClient<br/>(connection pool)
+    participant API as External API
 
-    Note over Agent,API_E: Entity Triangulation via Cross-References
+    Note over FastMCP,API: Server Startup (module load)
 
-    rect rgb(245, 248, 255)
-        Note over Agent,API_H: Step 1: Get Gene with Cross-References
-        Agent->>+Gateway: hgnc_get_gene("HGNC:5")
-        Gateway->>+HGNC_C: get_gene("HGNC:5")
-        HGNC_C->>+API_H: GET /fetch/hgnc_id/5
-        API_H-->>-HGNC_C: {<br/> symbol: "A1BG",<br/> ensembl_gene_id: "ENSG00000121410",<br/> uniprot_ids: ["P04217"],<br/> entrez_id: "1",<br/> refseq_accession: ["NM_130786"],<br/> omim_id: ["138670"]<br/>}
+    FastMCP->>Server: Import module
+    activate Server
 
-        HGNC_C->>+HGNC_C: _build_cross_references(doc)
-        Note right of HGNC_C: Map HGNC fields to<br/>22-key registry
+    Note over Server: Module-level variables:<br/>_client: HGNCClient | None = None
 
-        HGNC_C->>HGNC_C: CrossReferences {<br/> ensembl_gene: "ENSG00000121410",<br/> uniprot: ["P04217"],<br/> entrez: "1",<br/> refseq: ["NM_130786"],<br/> omim: "138670"<br/>}
-        Note right of HGNC_C: Omit keys with no value<br/>(Constitution III)
+    Server->>Server: mcp = FastMCP("HGNC Gene Server")
 
-        HGNC_C-->>-Gateway: Gene {<br/> id: "HGNC:5",<br/> symbol: "A1BG",<br/> cross_references: {...}<br/>}
-        Gateway-->>-Agent: Gene model
+    Note over Server: Decorate tools:<br/>@mcp.tool search_genes<br/>@mcp.tool get_gene
 
-        Note over Agent: Extract cross-references:<br/>- ensembl_gene: ENSG00000121410<br/>- uniprot: P04217<br/>- entrez: 1
-    end
+    Server-->>FastMCP: Module loaded
+    deactivate Server
 
-    rect rgb(248, 255, 248)
-        Note over Agent,API_U: Step 2: Validate Cross-Reference via UniProt
-        Agent->>+Gateway: uniprot_get_protein("UniProtKB:P04217")
-        Gateway->>+UniProt_C: get_protein("UniProtKB:P04217")
-        UniProt_C->>+API_U: GET /uniprotkb/P04217.json
-        API_U-->>-UniProt_C: {<br/> primaryAccession: "P04217",<br/> genes: [{geneName: "A1BG"}],<br/> uniProtKBCrossReferences: [<br/>  {database: "HGNC", id: "5"},<br/>  {database: "Ensembl", id: "ENSG00000121410"},<br/>  {database: "GeneID", id: "1"},<br/>  ...<br/> ]<br/>}
+    Note over FastMCP,API: First Request (lazy initialization)
 
-        UniProt_C->>+UniProt_C: _map_cross_references(xrefs)
+    FastMCP->>Server: call_tool("search_genes", {"query": "BRCA"})
+    activate Server
 
-        loop For each cross-reference
-            UniProt_C->>UniProt_C: Map database name to registry key:<br/>- "HGNC" → hgnc<br/>- "Ensembl" → ensembl_transcript<br/>- "GeneID" → entrez
-        end
+    Server->>GetClient: client = await get_client()
+    activate GetClient
 
-        UniProt_C->>UniProt_C: CrossReferences {<br/> hgnc: "5",<br/> ensembl_transcript: ["ENSG00000121410"],<br/> entrez: "1"<br/>}
-        Note right of UniProt_C: Cross-references back to<br/>original HGNC gene ✓
+    Note over GetClient: Check global _client<br/>if _client is None: initialize
 
-        UniProt_C-->>-Gateway: Protein {<br/> id: "UniProtKB:P04217",<br/> gene_names: ["A1BG"],<br/> cross_references: {...}<br/>}
-        Gateway-->>-Agent: Protein model
+    GetClient->>Client: _client = HGNCClient()
+    activate Client
 
-        Note over Agent: Verification:<br/>Protein.cross_references.hgnc == "5" ✓<br/>Confirms UniProt P04217 encodes HGNC:5
-    end
+    Note over Client: __init__:<br/>- base_url = HGNC_BASE_URL<br/>- _client: httpx.AsyncClient | None = None<br/>- _last_request_time = 0.0<br/>- _lock = asyncio.Lock()
 
-    rect rgb(255, 248, 248)
-        Note over Agent,API_E: Step 3: Triangulate via Ensembl
-        Agent->>+Gateway: ensembl_get_gene("ENSG00000121410")
-        Gateway->>+Ensembl_C: get_gene("ENSG00000121410")
-        Ensembl_C->>+API_E: GET /lookup/id/ENSG00000121410?expand=1
-        API_E-->>-Ensembl_C: {<br/> id: "ENSG00000121410",<br/> display_name: "A1BG",<br/> ...<br/>}
+    Client-->>GetClient: HGNCClient instance
+    deactivate Client
 
-        Ensembl_C->>+API_E: GET /xrefs/id/ENSG00000121410
-        API_E-->>-Ensembl_C: [<br/> {dbname: "HGNC", primary_id: "5"},<br/> {dbname: "Uniprot/SWISSPROT", primary_id: "P04217"},<br/> {dbname: "EntrezGene", primary_id: "1"},<br/> ...<br/>]
+    Note over GetClient: global _client = instance
 
-        Ensembl_C->>+Ensembl_C: _map_cross_references(xrefs)
+    GetClient-->>Server: HGNCClient instance
+    deactivate GetClient
 
-        loop For each xref
-            Ensembl_C->>Ensembl_C: Map dbname to registry key:<br/>- "HGNC" → hgnc (add prefix)<br/>- "Uniprot/SWISSPROT" → uniprot<br/>- "EntrezGene" → entrez
-        end
+    Server->>Client: await client.search_genes(...)
+    activate Client
 
-        Ensembl_C->>Ensembl_C: EnsemblCrossReferences {<br/> hgnc: "HGNC:5",<br/> uniprot: ["P04217"],<br/> entrez: "1"<br/>}
-        Note right of Ensembl_C: All cross-references match! ✓<br/>Triangulation confirms:<br/>HGNC:5 == UniProt:P04217<br/> == Ensembl:ENSG00000121410
+    Note over Client: First API call: create HTTP client
 
-        Ensembl_C-->>-Gateway: EnsemblGene {<br/> id: "ENSG00000121410",<br/> symbol: "A1BG",<br/> cross_references: {...}<br/>}
-        Gateway-->>-Agent: EnsemblGene model
+    Client->>Client: client = await self._get_client()
 
-        Note over Agent: Triangulation complete:<br/>3 independent sources confirm<br/>entity identity
-    end
+    Note over Client: if self._client is None:<br/>  self._client = httpx.AsyncClient(<br/>    base_url=self.base_url,<br/>    timeout=30.0,<br/>    limits=Limits(max_connections=10),<br/>    headers={"Accept": "application/json"}<br/>  )
 
-    Note over Agent: Result: High confidence<br/>that HGNC:5, UniProtKB:P04217,<br/>and ENSG00000121410 refer<br/>to the same gene (A1BG)
+    Client->>HTTPClient: Create connection pool
+    activate HTTPClient
+
+    Note over HTTPClient: Connection pool:<br/>- max_connections: 10<br/>- max_keepalive: 10<br/>- timeout: 30s
+
+    HTTPClient-->>Client: httpx.AsyncClient instance
+    deactivate HTTPClient
+
+    Client->>HTTPClient: await client.get("/search/BRCA")
+    activate HTTPClient
+
+    HTTPClient->>API: GET /search/BRCA
+    activate API
+    API-->>HTTPClient: 200 OK + JSON
+    deactivate API
+
+    HTTPClient-->>Client: httpx.Response
+    deactivate HTTPClient
+
+    Client-->>Server: PaginationEnvelope
+    deactivate Client
+
+    Server-->>FastMCP: PaginationEnvelope (JSON)
+    deactivate Server
+
+    Note over FastMCP,API: Subsequent Requests (reuse singleton)
+
+    FastMCP->>Server: call_tool("get_gene", {"hgnc_id": "HGNC:1100"})
+    activate Server
+
+    Server->>GetClient: client = await get_client()
+    activate GetClient
+
+    Note over GetClient: _client already exists<br/>return cached instance
+
+    GetClient-->>Server: HGNCClient instance (cached)
+    deactivate GetClient
+
+    Server->>Client: await client.get_gene(...)
+    activate Client
+
+    Note over Client: HTTP client already exists<br/>Reuse connection pool
+
+    Client->>HTTPClient: await client.get("/fetch/hgnc_id/1100")
+    activate HTTPClient
+
+    Note over HTTPClient: Reuse keep-alive connection<br/>(no new TCP handshake)
+
+    HTTPClient->>API: GET /fetch/hgnc_id/1100
+    activate API
+    API-->>HTTPClient: 200 OK + JSON
+    deactivate API
+
+    HTTPClient-->>Client: httpx.Response
+    deactivate HTTPClient
+
+    Client-->>Server: Gene
+    deactivate Client
+
+    Server-->>FastMCP: Gene (JSON)
+    deactivate Server
+
+    Note over FastMCP,API: Server Shutdown (FastMCP internal)
+
+    Note over FastMCP: FastMCP runtime handles cleanup<br/>(no explicit shutdown hooks needed)
+
+    Note over Client,HTTPClient: Connection pool cleanup<br/>handled by Python garbage collection
 ```
 
-**Cross-Reference Registry (22 Keys):**
+### Explanation
 
-| Registry Key | Example CURIE | Source Databases | Format |
-|---|---|---|---|
-| `hgnc` | HGNC:5 | HGNC, UniProt, Ensembl | HGNC:NNNNN |
-| `ensembl_gene` | ENSG00000121410 | HGNC, UniProt | ENSG + 11 digits |
-| `ensembl_transcript` | ENST00000263100 | UniProt, Ensembl | ENST + 11 digits |
-| `uniprot` | UniProtKB:P04217 | HGNC, Ensembl, ChEMBL | UniProtKB:ACCESSION |
-| `entrez` | 1 | HGNC, UniProt, Ensembl | Numeric ID |
-| `refseq` | NM_130786 | HGNC, UniProt | [NX][MR]_NNNNN |
-| `omim` | 138670 | HGNC, UniProt | 6-digit numeric |
-| `chembl` | CHEMBL:4860 | UniProt, ChEMBL | CHEMBL:NNNNN |
-| `pubchem_compound` | 2244 | ChEMBL, PubChem | Numeric ID |
-| `drugbank` | DB:01050 | ChEMBL | DB:NNNNN |
-| `pdb` | 1HZH | UniProt, Ensembl | Uppercase alphanumeric |
-| ... | ... | ... | ... |
+**Module-Level Singleton Pattern** (Per ADR-004)
 
-**Triangulation Validation:**
+Each MCP server uses a module-level singleton for client instance:
 
-1. **Fetch entity from Database A** (e.g., HGNC:5)
-   - Extract cross-references: `{uniprot: ["P04217"], ensembl_gene: "ENSG00000121410"}`
+**Server Implementation** (`/src/lifesciences_mcp/servers/hgnc.py:24-33`)
+```python
+# Shared client instance (connection pooling)
+_client: HGNCClient | None = None
 
-2. **Fetch cross-referenced entity from Database B** (e.g., UniProtKB:P04217)
-   - Extract cross-references: `{hgnc: "5", ensembl_transcript: ["ENSG00000121410"]}`
-   - **Validate**: Does `cross_references.hgnc` match original HGNC:5? ✓
+async def get_client() -> HGNCClient:
+    """Get or create the shared HGNC client."""
+    global _client
+    if _client is None:
+        _client = HGNCClient()
+    return _client
+```
 
-3. **Fetch from Database C** (e.g., Ensembl ENSG00000121410)
-   - Extract cross-references: `{hgnc: "HGNC:5", uniprot: ["P04217"]}`
-   - **Validate**: Do cross-references match both original identifiers? ✓
+**Tool Usage** (lines 36-64)
+```python
+@mcp.tool
+async def search_genes(
+    query: str,
+    slim: bool = False,
+    cursor: str | None = None,
+    page_size: int = 50,
+) -> PaginationEnvelope[SearchCandidate] | ErrorEnvelope:
+    client = await get_client()  # Lazy init on first call
+    return await client.search_genes(...)
+```
 
-4. **Result**: If all cross-references are bidirectional and consistent, high confidence that identifiers refer to same biological entity
+**Lazy HTTP Client Initialization** (`/src/lifesciences_mcp/clients/base.py:41-54`)
 
-**Why Triangulation Matters:**
+HTTP client created on first API call, not during class initialization:
 
-- **Data quality issues**: Some cross-references may be outdated or incorrect
-- **Multiple isoforms**: One gene may have multiple proteins (UniProt entries)
-- **Disambiguation**: Common names may map to multiple entities
-- **Confidence scoring**: More matching cross-references = higher confidence
+```python
+async def _get_client(self) -> httpx.AsyncClient:
+    """Get or create the async HTTP client with connection pooling."""
+    if self._client is None or self._client.is_closed:
+        limits = httpx.Limits(
+            max_connections=self._max_connections,
+            max_keepalive_connections=self._max_connections,
+        )
+        self._client = httpx.AsyncClient(
+            base_url=self.base_url,
+            timeout=httpx.Timeout(self._timeout),
+            limits=limits,
+            headers={"Accept": "application/json"},
+        )
+    return self._client
+```
 
-**Code References:**
-- HGNC cross-ref mapping: `src/lifesciences_mcp/clients/hgnc.py` (lines 333-344)
-- UniProt cross-ref mapping: `src/lifesciences_mcp/clients/uniprot.py` (lines 114-168)
-- Ensembl cross-ref mapping: `src/lifesciences_mcp/clients/ensembl.py` (lines 184-221)
-- CrossReferences model: `src/lifesciences_mcp/models/gene.py` (lines 27-143)
-- Omit-if-null pattern: `src/lifesciences_mcp/models/gene.py` (lines 130-142)
+**Connection Pool Benefits:**
 
----
+1. **TCP Connection Reuse**: Keep-alive connections avoid repeated handshakes
+2. **Request Pipelining**: Multiple concurrent requests share connection pool
+3. **Resource Efficiency**: Max 10 connections per client (configurable)
+4. **Timeout Management**: Centralized timeout configuration
 
-## Summary
+**Lifecycle Stages:**
 
-The Life Sciences MCP system implements a sophisticated **data flow architecture** with several key patterns:
+**1. Module Import (Cold Start)**
+- FastMCP imports server module
+- Module-level variables initialized (`_client = None`)
+- No API clients created yet
+- No network connections established
 
-### Core Architectural Patterns
+**2. First Request (Lazy Initialization)**
+- Tool called → `get_client()` → Creates HGNCClient instance
+- First API call → `_get_client()` → Creates httpx.AsyncClient
+- Connection pool established with 10 max connections
+- Global `_client` variable caches instance
 
-1. **Fuzzy-to-Fact Protocol**
-   - Two-phase resolution: fuzzy search → strict lookup
-   - CURIE validation enforces unambiguous identifiers
-   - Recovery hints enable agent self-correction
+**3. Subsequent Requests (Connection Reuse)**
+- Tool called → `get_client()` → Returns cached instance
+- API calls reuse existing HTTP client and connection pool
+- Keep-alive connections avoid TCP overhead
 
-2. **Gateway Composition**
-   - 12 independent domain servers composed into single endpoint
-   - Direct function calls (as_proxy=False) eliminate network overhead
-   - Prefix-based routing with explicit tool name mapping
+**4. Server Shutdown (FastMCP Internal)**
+- FastMCP runtime handles cleanup (no explicit hooks needed)
+- Python garbage collection cleans up clients
+- HTTP connections gracefully closed
 
-3. **Canonical Envelopes**
-   - `PaginationEnvelope` for search operations with cursor-based pagination
-   - `ErrorEnvelope` with standardized error codes and recovery hints
-   - Omit-if-null pattern reduces JSON payload size
+**Why No Shutdown Hooks?** (Per ADR-004)
 
-4. **Cross-Reference Triangulation**
-   - 22-key registry enables identifier hopping across databases
-   - Bidirectional validation increases confidence
-   - Independent sources confirm entity identity
+FastMCP does NOT support `@mcp.on_event("shutdown")` hooks. Lifecycle managed via:
+- Module-level singletons (lazy init)
+- Python context managers (for manual cleanup)
+- FastMCP internal cleanup (for server shutdown)
 
-### Resilience Features
+**Manual Cleanup Pattern** (For scripts/tests, not production servers)
 
-1. **Rate Limiting**
-   - Per-client rate limiting with asyncio locks
-   - Thundering herd prevention via time re-checks after lock acquisition
-   - Database-specific limits (10 req/s HGNC, 15 req/s Ensembl)
+```python
+# Client as context manager
+async with HGNCClient() as client:
+    result = await client.search_genes("BRCA1")
+    # Client automatically closed on exit
 
-2. **Error Handling**
-   - Exponential backoff for 429/503 errors (3 retries, 2^attempt delay)
-   - All errors wrapped in ErrorEnvelope (never raw exceptions)
-   - Actionable recovery hints guide agent to resolution
+# Or explicit close
+client = HGNCClient()
+try:
+    result = await client.search_genes("BRCA1")
+finally:
+    await client.close()
+```
 
-3. **Connection Pooling**
-   - Singleton clients with httpx.AsyncClient
-   - Configurable max_connections per client
-   - Thread pool for synchronous SDKs (ChEMBL)
+**Context Manager Implementation** (`/src/lifesciences_mcp/clients/hgnc.py:52-60`)
+```python
+async def __aenter__(self) -> "HGNCClient":
+    """Enter context manager."""
+    return self
 
-### Data Quality Patterns
+async def __aexit__(
+    self, exc_type: type | None, exc_val: Exception | None, exc_tb: object
+) -> None:
+    """Exit context manager and cleanup resources."""
+    await self.close()
+```
 
-1. **Pydantic Validation**
-   - Runtime type checking against function signatures
-   - CURIE format validation with regex patterns
-   - Field constraints (e.g., score between 0.0-1.0)
+**Close Method** (`/src/lifesciences_mcp/clients/base.py:56-60`)
+```python
+async def close(self) -> None:
+    """Close the HTTP client."""
+    if self._client is not None:
+        await self._client.aclose()
+        self._client = None
+```
 
-2. **Score Calculation**
-   - Alias boosting (perfect score for known aliases)
-   - Exact match detection (symbol == query)
-   - Position-based decay for relevance ranking
+**ThreadPoolExecutor Lifecycle** (ChEMBL example, `/src/lifesciences_mcp/clients/chembl.py:87-92`)
 
-3. **Cross-Reference Mapping**
-   - Consistent CURIE formats across all databases
-   - Omit-if-null pattern for cleaner JSON
-   - Validation against registry patterns
+For clients wrapping synchronous SDKs:
 
-### Performance Optimizations
+```python
+def _get_executor(self) -> ThreadPoolExecutor:
+    """Get or create the thread pool executor."""
+    if self._executor is None:
+        # Use Python defaults: min(32, (os.cpu_count() or 1) + 4)
+        self._executor = ThreadPoolExecutor()
+    return self._executor
+```
 
-1. **Client-Side Pagination**
-   - HGNC/ChEMBL buffer results for cursor-based slicing
-   - Opaque base64 cursors prevent manipulation
-   - total_count enables progress indicators
+**Cleanup** (lines 675-680)
+```python
+async def close(self) -> None:
+    """Close the client and cleanup resources."""
+    await super().close()  # Close HTTP client
+    if self._executor is not None:
+        self._executor.shutdown(wait=False)
+        self._executor = None
+```
 
-2. **Batch Operations**
-   - ChEMBL batch lookup prevents thread pool exhaustion
-   - Single API call for multiple compounds
-   - Preserves order and handles individual failures
+**Connection Pool Configuration:**
 
-3. **Lazy Initialization**
-   - Singleton clients created on first use
-   - Connection pools established on demand
-   - No resource allocation for unused servers
+Default values from `LifeSciencesClient.__init__`:
+- `timeout`: 30.0 seconds
+- `max_connections`: 10
+- `max_keepalive_connections`: 10
 
-This architecture provides a **robust, scalable foundation** for biological data integration with clear separation of concerns, consistent error handling, and strong validation guarantees.
+Customizable per client:
+```python
+class HGNCClient(LifeSciencesClient):
+    def __init__(self) -> None:
+        super().__init__(
+            base_url=self.HGNC_BASE_URL,
+            timeout=30.0,
+            max_connections=10
+        )
+```
+
+**Key Components:**
+- Base client: `/src/lifesciences_mcp/clients/base.py` (LifeSciencesClient)
+- Server pattern: All 13 servers use module-level singleton
+- Lifecycle docs: ADR-004 (FastMCP Lifecycle Management)
+
+**Benefits:**
+- **Resource Efficiency**: Single client instance per server
+- **Connection Pooling**: Reuse TCP connections across requests
+- **Zero Configuration**: No cleanup hooks needed for production
+- **Test Flexibility**: Context manager pattern for explicit cleanup in tests
+
+## Additional Patterns and Flows
+
+### Cross-Database Workflow: Gene-to-Trials Pipeline
+
+Real-world example demonstrating multi-database navigation for clinical research:
+
+```python
+# Use case: Find clinical trials for genes associated with breast cancer
+
+# 1. Search for disease-gene associations
+associations = await opentargets_client.get_associations(
+    disease_id="EFO:0000305",  # breast carcinoma
+    limit=20
+)
+
+# 2. Get top associated genes
+for assoc in associations.items[:5]:
+    # 3. Resolve gene from HGNC
+    gene = await hgnc_client.get_gene(f"HGNC:{assoc.target_id}")
+
+    # 4. Find clinical trials targeting this gene
+    trials = await clinicaltrials_client.search_trials(
+        query=gene.symbol,
+        condition="breast cancer",
+        status="RECRUITING"
+    )
+
+    # 5. Get trial details
+    for trial_candidate in trials.items[:3]:
+        trial = await clinicaltrials_client.get_trial(trial_candidate.id)
+        print(f"Trial {trial.id}: {trial.title}")
+        print(f"  Phase: {trial.phase}, Status: {trial.status}")
+        print(f"  Gene: {gene.symbol} ({gene.name})")
+```
+
+### Fuzzy-to-Fact Error Prevention
+
+The protocol prevents common agent mistakes:
+
+**Mistake 1: Using raw strings for strict lookups**
+```python
+# Agent tries: get_gene("BRCA1")
+# Result: UNRESOLVED_ENTITY error
+# Hint: "Call search_genes to resolve the identifier first."
+
+# Correct workflow:
+results = await client.search_genes("BRCA1")
+gene = await client.get_gene(results.items[0].id)  # "HGNC:1100"
+```
+
+**Mistake 2: Skipping search phase**
+```python
+# Agent tries: get_protein("p53")
+# Result: UNRESOLVED_ENTITY error
+# Hint: "Call search_proteins to resolve identifier first."
+
+# Correct workflow:
+results = await client.search_proteins("p53")
+protein = await client.get_protein(results.items[0].id)  # "UniProtKB:P04637"
+```
+
+**Mistake 3: Using incorrect CURIE format**
+```python
+# Agent tries: get_trial("NCT00461032")  # Missing colon
+# Result: UNRESOLVED_ENTITY error
+# Hint: "Expected format: NCT:NNNNNNNN (e.g., NCT:00461032)"
+
+# Correct format:
+trial = await client.get_trial("NCT:00461032")
+```
+
+### Rate Limiting Coordination Across Clients
+
+Multiple concurrent requests coordinate through the lock:
+
+```python
+# Agent makes 5 concurrent searches
+results = await asyncio.gather(
+    client.search_genes("BRCA1"),
+    client.search_genes("TP53"),
+    client.search_genes("EGFR"),
+    client.search_genes("KRAS"),
+    client.search_genes("MYC")
+)
+
+# Rate limiter ensures 100ms spacing:
+# T=0ms:    BRCA1 request
+# T=100ms:  TP53 request (blocked until T=100)
+# T=200ms:  EGFR request (blocked until T=200)
+# T=300ms:  KRAS request (blocked until T=300)
+# T=400ms:  MYC request (blocked until T=400)
+# Total time: ~500ms (vs 5ms if no rate limiting)
+```
+
+## Summary of Data Flow Patterns
+
+The Life Sciences MCP system implements several sophisticated patterns:
+
+1. **Fuzzy-to-Fact Protocol**: 2-phase query pattern preventing ambiguous identifiers
+2. **Rate-Limited Clients**: Lock-based rate limiting with thundering herd prevention
+3. **Error Recovery**: Structured errors with actionable hints for autonomous correction
+4. **Gateway Composition**: Direct mounting without proxy overhead
+5. **Batch Operations**: Single API calls for multiple entities
+6. **Cross-Database Navigation**: 22-key registry for seamless database traversal
+7. **Session Lifecycle**: Module-level singletons with lazy initialization
+
+These patterns enable AI agents to:
+- Query 12 life sciences databases through a unified interface
+- Autonomously recover from errors using recovery hints
+- Navigate across databases using standardized cross-references
+- Efficiently batch operations to prevent thread pool exhaustion
+- Respect upstream API rate limits while maintaining high throughput
+
+**Key Metrics:**
+- 12 operational MCP servers
+- 34+ MCP tools
+- 13 API clients with connection pooling
+- 20+ Pydantic data models
+- 500+ integration tests
+- 100+ unit tests
+- 22-key cross-reference registry
+
+**Key Files:**
+- Gateway: `/src/lifesciences_mcp/servers/gateway.py`
+- Base client: `/src/lifesciences_mcp/clients/base.py`
+- Models: `/src/lifesciences_mcp/models/*.py`
+- Servers: `/src/lifesciences_mcp/servers/*.py`
+- Clients: `/src/lifesciences_mcp/clients/*.py`
+- Tests: `/tests/integration/test_*.py`
+
+This documentation provides a complete reference for understanding how data flows through the Life Sciences MCP system, from initial query to cross-database workflows.

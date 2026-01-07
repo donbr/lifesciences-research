@@ -483,7 +483,7 @@ The implementation is **production-ready**. The following are enhancement opport
 ## Report Metadata
 
 **Analysis Scope**:
-- Feature directory: `/home/donbr/graphiti-org/lifesciences-research/specs/006-string-mcp-server/`
+- Feature directory: `specs/006-string-mcp-server/`
 - Artifacts analyzed: spec.md, plan.md, tasks.md, constitution.md
 - Analysis timestamp: 2026-01-03
 - Constitution version: v1.1.0 (2025-12-22)

@@ -1,590 +1,1655 @@
-# Repository Architecture Documentation
-
-## Executive Summary
-
-The **Life Sciences MCP** is a production-grade microservices gateway that enables AI agents to query 12+ operational biological databases through the Model Context Protocol (MCP). Built on FastMCP and httpx, it implements a rigorous **Fuzzy-to-Fact protocol** to prevent hallucination: agents first perform fuzzy search to get ranked candidates, then use strict lookup with validated CURIEs (Compact URIs) to fetch complete records with cross-references.
-
-The architecture solves a critical problem in AI-driven drug discovery: converting unstructured biological terms ("p53 tumor suppressor") into structured, validated entities with bidirectional cross-references across 13+ databases. This enables agents to triangulate entity identity, verify relationships, and construct reliable knowledge graphs for high-stakes decision-making. The system has processed 500+ integration tests and is deployed on FastMCP Cloud at `https://lifesciences.fastmcp.app/mcp`.
-
-Key architectural decisions include:
-- **1:1 server-client mapping** for independent testing and evolution
-- **Canonical envelopes** (PaginationEnvelope, ErrorEnvelope) for schema determinism
-- **22-key cross-reference registry** enabling entity triangulation
-- **Gateway composition pattern** with zero-overhead direct function calls
-- **Progressive disclosure** (slim/full modes) for token budget optimization
-
-The codebase spans 13,756 lines of production Python (8,162 client layer, 3,403 model layer, 2,191 server layer) with comprehensive validation, rate limiting, and error recovery built into every component.
-
-## Quick Start Guide
-
-### Using This Documentation
-
-**If you are an architect:** Start with [02_architecture_diagrams.md](diagrams/02_architecture_diagrams.md) for progressive disclosure diagrams (conceptual → logical → physical layers) showing system context, component relationships, and deployment topology.
-
-**If you are a developer:** Start with [04_api_reference.md](docs/04_api_reference.md) for complete API documentation including client methods, MCP tools, request/response schemas, and working code examples.
-
-**If you are new to the codebase:** Start with [01_component_inventory.md](docs/01_component_inventory.md) for a comprehensive inventory of all 14 clients, 63+ models, 13 servers, and 40+ MCP tools with line-level source references.
-
-**If you are troubleshooting:** Start with [03_data_flows.md](docs/03_data_flows.md) for sequence diagrams showing request/response lifecycles, error propagation chains, rate limiting behavior, and pagination mechanics.
-
-### Key Concepts
-
-**Fuzzy-to-Fact Protocol**
-A two-phase resolution pattern enforced across all 12 servers:
-1. **Phase 1 (Fuzzy)**: Search operations accept natural language queries and return ranked candidates with relevance scores (0.0-1.0). Example: `search_genes("p53")` returns `[{id: "HGNC:11998", symbol: "TP53", score: 1.0}]`
-2. **Phase 2 (Fact)**: Strict lookup operations require validated CURIEs and return complete entities with cross-references. Example: `get_gene("HGNC:11998")` returns full Gene model with UniProt/Ensembl/Entrez links
-
-This architectural constraint makes it structurally impossible for agents to bypass entity resolution, preventing hallucinated mappings between biological entities.
-
-**Cross-Reference Registry**
-A 22-key standardized schema (hgnc, uniprot, ensembl_gene, entrez, chembl, pdb, omim, etc.) enabling entity triangulation. When an agent fetches a gene from HGNC, the response includes `cross_references.uniprot: ["P04637"]`. Fetching that protein from UniProt returns `cross_references.hgnc: "HGNC:11998"`, enabling bidirectional validation. See [CrossReferences model](docs/01_component_inventory.md#cross-references) for full 22-key registry.
-
-**MCP (Model Context Protocol)**
-Anthropic's standardized protocol for exposing tools to AI agents over JSON-RPC 2.0. Our FastMCP-based servers expose 40+ tools (e.g., `hgnc_search_genes`, `uniprot_get_protein`) with auto-generated JSON Schema validation from Pydantic type hints. Agents call tools with named parameters; servers return PaginationEnvelope or ErrorEnvelope.
-
-**Gateway Composition Pattern**
-The gateway server (116 lines) composes 12 independent domain servers using FastMCP's mounting feature with `as_proxy=False` for direct Python function calls (zero network overhead). Each tool is prefixed by domain (e.g., `hgnc_search_genes`, `chembl_get_compound`) to prevent name collisions. See [gateway.py:52-109](docs/01_component_inventory.md#gateway-server-unified-access) for mounting configuration.
-
-**Canonical Envelopes**
-All responses use standardized wrappers:
-- `PaginationEnvelope[T]` wraps list results with cursor-based pagination metadata (total_count, page_size, next cursor)
-- `ErrorEnvelope` wraps all errors with standardized error codes (UNRESOLVED_ENTITY, ENTITY_NOT_FOUND, RATE_LIMITED, etc.) and actionable recovery hints ("Call search_genes to resolve the identifier first")
-
-These envelopes enable reliable agent reasoning by providing schema determinism across all 40+ tools.
-
-## Architecture at a Glance
-
-### System Context
-
-```mermaid
-graph LR
-    Agent[AI Agent]
-    Gateway[MCP Gateway<br/>40+ Tools]
-    Servers[12 Domain<br/>Servers]
-    Clients[14 HTTP<br/>Clients]
-    APIs[External<br/>Life Sciences<br/>APIs]
-
-    Agent -->|JSON-RPC 2.0| Gateway
-    Gateway -->|Direct Function Calls| Servers
-    Servers -->|Delegate| Clients
-    Clients -->|HTTP/GraphQL| APIs
-    APIs -->|Structured Data| Clients
-    Clients -->|Pydantic Models| Servers
-    Servers -->|PaginationEnvelope<br/>ErrorEnvelope| Gateway
-    Gateway -->|MCP Response| Agent
-
-    classDef agent fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
-    classDef system fill:#e1f5fe,stroke:#01579b,stroke-width:2px
-    classDef external fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
-
-    class Agent agent
-    class Gateway,Servers,Clients system
-    class APIs external
-```
-
-The Life Sciences MCP sits between AI agents (Claude, GPT-4, etc.) and 12 operational biological databases, implementing a gateway pattern that:
-
-1. **Accepts** JSON-RPC 2.0 requests from MCP clients (Claude Desktop, custom agents)
-2. **Routes** tool calls to domain-specific servers based on prefix (`hgnc_`, `uniprot_`, `chembl_`)
-3. **Delegates** to async HTTP clients with rate limiting, connection pooling, exponential backoff
-4. **Validates** responses using Pydantic models with CURIE format checking and cross-reference validation
-5. **Returns** standardized envelopes (PaginationEnvelope or ErrorEnvelope) to agent
-
-The system integrates with: HGNC (gene nomenclature), UniProt (protein sequences), ChEMBL (bioactivity), Open Targets (disease associations), STRING/BioGRID (interactions), Ensembl/Entrez (genomics), PubChem/IUPHAR (chemistry), WikiPathways (pathways), ClinicalTrials.gov (trials).
-
-### Key Design Decisions
-
-**1. Why microservices pattern?**
-Each biological database has unique API characteristics (REST vs GraphQL, synchronous vs async, different rate limits). The 1:1 server-client pattern enables independent evolution: when HGNC changes their API, only `clients/hgnc.py` and `servers/hgnc.py` need updates. The gateway composes all operational servers for cloud deployment while each server remains independently testable.
-
-**2. Why 1:1 server-client mapping?**
-Separation of concerns: servers expose MCP tools and handle protocol concerns (JSON-RPC, error wrapping), clients handle HTTP logic and API-specific quirks (rate limiting, pagination, SDK wrapping). This enables testing HTTP clients in isolation without MCP overhead and reusing clients in non-MCP contexts (batch scripts, notebooks).
-
-**3. Why canonical envelopes?**
-Schema determinism enables reliable agent reasoning. All search operations return `PaginationEnvelope[SearchCandidate]` with identical structure regardless of source database. All errors use `ErrorEnvelope` with standardized error codes and recovery hints. This prevents agents from needing database-specific error handling logic.
-
-**4. Why cross-reference registry?**
-Entity triangulation for validation. When an agent queries TP53 from three databases (HGNC, UniProt, Ensembl), the cross-references should bidirectionally link. If HGNC says `uniprot: ["P04637"]` but UniProt says `hgnc: "HGNC:999"` (mismatch), the agent can detect data quality issues. The 22-key standardized registry makes cross-database validation systematic.
-
-**5. Why Fuzzy-to-Fact protocol?**
-Hallucination prevention. If strict lookup tools accepted raw strings, agents could pass "BRCA1 breast cancer gene" directly to `get_gene()`, leading to ambiguous resolution. By enforcing CURIE validation (regex `^HGNC:\d+$`), strict tools return `UNRESOLVED_ENTITY` error on raw strings, forcing agents to use fuzzy search first. This architectural constraint makes hallucination structurally impossible.
-
-**6. Why gateway composition?**
-Single deployment artifact. Running 12 separate MCP servers would require clients to manage 12 different connections. The gateway composes all servers into one unified interface with prefixed tool names (`hgnc_search_genes` vs `uniprot_search_proteins`). Using `as_proxy=False` enables direct Python function calls between gateway and domain servers (zero network overhead).
-
-**7. Why progressive disclosure (slim/full modes)?**
-Token budget optimization for multi-hop reasoning. Search operations in slim mode return ~20 tokens/entity (id, symbol, name, score). Full mode returns ~300 tokens with complete metadata and cross-references. Agents can review 50 candidates in slim mode (~1K tokens), select top match, fetch full record (~300 tokens) - total 1.3K tokens vs 15K if all 50 were full records.
-
-### Technology Stack
-
-| Layer | Technology | Purpose |
-|-------|------------|---------|
-| **MCP Protocol** | FastMCP 0.2.0 | MCP server framework with auto-schema generation |
-| **HTTP Client** | httpx 0.27.0 (async) | Async HTTP with connection pooling (10 concurrent) |
-| **Data Validation** | Pydantic 2.0+ | Runtime validation, CURIE format checking, serialization |
-| **External SDK** | chembl_webresource_client 0.10.8 | ChEMBL Web Services SDK (wrapped with run_in_executor) |
-| **Rate Limiting** | asyncio.Lock + time.time() | Per-client rate limiting with thundering herd prevention |
-| **Deployment** | FastMCP Cloud | Production endpoint: https://lifesciences.fastmcp.app/mcp |
-| **Testing** | pytest + pytest-asyncio | 500+ integration/unit tests with VCR.py for fixtures |
-| **Package Management** | uv (Astral) | Fast Python package installer and environment manager |
-
-## Component Overview
-
-### By Category
-
-**Servers (13 total):**
-- **Gateway Server** (116 lines) - Unified composition of 12 domain servers
-- **Gene Servers** (3): HGNC (86 lines), Ensembl (180 lines), Entrez (160 lines)
-- **Protein Servers** (3): UniProt (100 lines), STRING (150 lines), BioGRID (100 lines)
-- **Compound Servers** (4): ChEMBL (130 lines), PubChem (150 lines), IUPHAR (400 lines), DrugBank (100 lines)
-- **Clinical/Pathway Servers** (3): WikiPathways (180 lines), ClinicalTrials (300 lines), Open Targets (130 lines)
-
-All servers follow identical pattern: define `mcp = FastMCP("Server Name")`, expose tools via `@mcp.tool` decorator, lazy-initialize singleton client on first use. See [Component Inventory - Servers](docs/01_component_inventory.md#server-package-lifesciences_mcpservers).
-
-**Clients (14 total, 8,162 lines):**
-- **Base Client** (66 lines) - LifeSciencesClient with httpx.AsyncClient pooling
-- **Domain Clients** (13): Each extends base client, implements rate limiting, CURIE validation, cross-reference mapping
-- Key clients: HGNCClient (353 lines), UniProtClient (400+ lines), ChEMBLClient (680 lines), OpenTargetsClient (730 lines)
-
-All clients support async context managers for cleanup, implement retry logic with exponential backoff, wrap responses in canonical envelopes. See [Component Inventory - Clients](docs/01_component_inventory.md#client-package-lifesciences_mcpclients).
-
-**Models (63+ classes, 3,403 lines):**
-- **Envelopes** (2): PaginationEnvelope[T], ErrorEnvelope with 6 standard error codes
-- **Domain Models** (18 modules): Gene, Protein, Compound, Drug, Ligand, Target, Interaction, Pathway, Trial, etc.
-- **Cross-References** (1): 22-key registry model shared across all entity types
-- **Search Candidates** (11): Lightweight models for fuzzy search results (~20 tokens each)
-
-All models use Pydantic BaseModel with field validators for CURIE format checking, omit-if-null serialization pattern (exclude_none=True), regex patterns defined in ADR-001 Appendix A. See [Component Inventory - Models](docs/01_component_inventory.md#model-package-lifesciences_mcpmodels).
-
-**MCP Tools (40+ total):**
-- **Gene Tools** (8): Search and lookup across HGNC, Ensembl, Entrez + PubMed linking
-- **Protein Tools** (5): UniProt search/lookup, STRING/BioGRID interaction networks
-- **Compound Tools** (9): ChEMBL, PubChem, IUPHAR, DrugBank with batch operations
-- **Target-Disease Tools** (3): Open Targets search, target details, associations
-- **Pathway Tools** (4): WikiPathways search, lookup, gene reverse-lookup, component extraction
-- **Clinical Trial Tools** (3): ClinicalTrials.gov search, trial details, locations
-
-See [MCP Tools Reference](docs/04_api_reference.md#mcp-tools-reference) for complete tool inventory with parameters and return types.
-
-### Key Metrics
-
-| Metric | Value | Notes |
-|--------|-------|-------|
-| **Lines of Code** | 13,756 | Excludes tests, analysis framework, .venv |
-| **Client Layer** | 8,162 lines | 14 async HTTP clients with rate limiting |
-| **Model Layer** | 3,403 lines | 63+ Pydantic models with validation |
-| **Server Layer** | 2,191 lines | 13 FastMCP servers with 40+ tools |
-| **External APIs** | 12 operational | HGNC, UniProt, ChEMBL, OpenTargets, STRING, BioGRID, Ensembl, Entrez, PubChem, IUPHAR, WikiPathways, ClinicalTrials |
-| **MCP Tools** | 40+ | All follow Fuzzy-to-Fact protocol |
-| **Test Coverage** | 500+ tests | Integration, unit, performance, competency validation |
-| **Test Files** | 44 total | 20 unit, 19 integration, 1 gap, 4 manual |
-| **Rate Limits** | 1-30 req/s | Database-specific (HGNC=10, Ensembl=15, DrugBank=30) |
-| **Max Connections** | 10 per client | httpx.AsyncClient connection pool |
-| **Error Codes** | 6 standard | UNRESOLVED_ENTITY, ENTITY_NOT_FOUND, AMBIGUOUS_QUERY, RATE_LIMITED, UPSTREAM_ERROR, INVALID_CROSS_REFERENCE |
-| **Cross-Reference Keys** | 22 total | Agentic Biolink registry (hgnc, uniprot, ensembl, entrez, chembl, pdb, omim, etc.) |
-| **CURIE Patterns** | 15+ validated | Regex patterns for HGNC, UniProt, ChEMBL, Ensembl, Entrez, etc. |
-| **Pagination Strategy** | Cursor-based | Opaque base64-encoded cursors for stateless pagination |
-
-## Data Flow Patterns
-
-### Primary Flows
-
-The system implements five fundamental data flow patterns documented with sequence diagrams in [03_data_flows.md](docs/03_data_flows.md):
-
-**1. Simple Query Flow (Fuzzy-to-Fact Protocol)**
-Agent searches gene "BRCA1" → fuzzy search returns candidates with scores → agent selects HGNC:1100 → strict lookup returns Gene with cross-references. Key feature: CURIE validation prevents invalid inputs from reaching strict lookup tools. See [Simple Query Flow](docs/03_data_flows.md#1-simple-query-flow).
-
-**2. Interactive Session Flow (Cross-Reference Triangulation)**
-Agent starts with gene TP53 → extracts UniProt ID from cross-references → fetches protein → extracts ChEMBL ID → fetches compound with drug indications. Demonstrates multi-hop reasoning using 22-key registry. See [Interactive Session Flow](docs/03_data_flows.md#2-interactive-client-session-flow).
-
-**3. Tool Permission Flow (MCP Discovery)**
-MCP client connects → sends initialize() → gateway returns capabilities with 40+ tools → client requests tools/list → gateway returns JSON Schema for each tool → client validates arguments before sending tools/call. See [Tool Permission Flow](docs/03_data_flows.md#3-tool-permission-callback-flow).
-
-**4. MCP Server Communication (Gateway Composition)**
-Gateway imports 12 server modules → mounts each with prefix and tool_names mapping → client sends tools/call to `hgnc_search_genes` → FastMCP routes to HGNC server → direct Python function call (no network overhead) → returns PaginationEnvelope. See [MCP Server Communication](docs/03_data_flows.md#4-mcp-server-communication-flow).
-
-**5. Message Parsing Flow (Pydantic Validation)**
-Client builds JSON-RPC request → FastMCP parses method="tools/call" → extracts arguments and validates against function signature using Pydantic → calls handler with validated kwargs → handler returns Pydantic model → serialized with exclude_none=True → wrapped in MCP response. See [Message Parsing Flow](docs/03_data_flows.md#5-message-parsing-and-routing).
-
-### Cross-Cutting Concerns
-
-**Error Handling**
-All errors wrapped in ErrorEnvelope with standardized codes and recovery hints. Example: passing "BRCA1" to `get_gene()` returns `UNRESOLVED_ENTITY` with hint "Call search_genes to resolve the identifier first." Rate limit errors (429) trigger exponential backoff (3 retries, 2^attempt delay). See [Error Handling Flow](docs/03_data_flows.md#error-handling-flow).
-
-**Pagination**
-Cursor-based pagination with two strategies: (1) Client-side slicing for APIs without pagination (HGNC, ChEMBL) using base64-encoded offset cursors, (2) Server-side cursors for APIs with native pagination (UniProt). cursor=null signals end of results. See [Pagination Flow](docs/03_data_flows.md#pagination-flow).
-
-**Cross-References**
-Every entity model includes CrossReferences object with 22-key registry. Cross-reference extraction happens in client layer using `_build_cross_references()` or `_map_cross_references()` methods that normalize database-specific formats to CURIE format. Omit-if-null pattern ensures only present keys are serialized. See [Cross-Reference Resolution Flow](docs/03_data_flows.md#cross-reference-resolution-flow).
-
-## API Surface
-
-### Public API
-
-The package exports a clean public API through `src/lifesciences_mcp/__init__.py`:
-
-```python
-from lifesciences_mcp import (
-    # Clients (10 main)
-    HGNCClient, UniProtClient, ChEMBLClient, OpenTargetsClient,
-    PubChemClient, IUPHARClient, WikiPathwaysClient,
-    ClinicalTrialsClient, DrugBankClient, LifeSciencesClient,
-
-    # Models
-    Gene, SearchCandidate, CrossReferences,
-    Protein, ProteinSearchCandidate,
-    Compound, CompoundSearchCandidate,
-    PubChemCompound, PubChemSearchCandidate,
-    Ligand, LigandSearchCandidate,
-    PharmacologicalTarget, PharmacologicalTargetSearchCandidate,
-
-    # Envelopes
-    PaginationEnvelope, ErrorEnvelope
-)
-```
-
-See [Public API Documentation](docs/01_component_inventory.md#public-api) for complete export list and usage examples.
-
-### MCP Tools by Domain
-
-| Domain | Tool Count | Example Tools | Example Use Case |
-|--------|------------|---------------|------------------|
-| **Genes** | 8 | hgnc_search_genes, hgnc_get_gene, entrez_get_pubmed_links | Look up gene symbols, resolve aliases, find literature |
-| **Proteins** | 5 | uniprot_search_proteins, uniprot_get_protein, string_get_interactions | Find proteins, retrieve sequences, analyze interaction networks |
-| **Compounds** | 9 | chembl_search_compounds, chembl_get_compound, chembl_get_compounds_batch | Search bioactive compounds, fetch drug data, batch lookups |
-| **Drugs** | 6 | drugbank_search_drugs, iuphar_search_ligands, iuphar_get_target | Find approved drugs, pharmacological targets, receptor interactions |
-| **Target-Disease** | 3 | opentargets_search_targets, opentargets_get_associations | Identify disease-associated genes, find therapeutic targets |
-| **Interactions** | 5 | string_get_interactions, biogrid_get_interactions, string_get_network_image_url | Build protein networks, find genetic interactions, visualize |
-| **Pathways** | 4 | wikipathways_search_pathways, wikipathways_get_pathway_components | Find biological pathways, extract pathway genes, analyze signaling |
-| **Clinical Trials** | 3 | clinicaltrials_search_trials, clinicaltrials_get_trial | Discover trials by disease/drug, review protocols, find sites |
-
-See [MCP Tools Reference](docs/04_api_reference.md#mcp-tools-reference) for complete tool inventory with parameters, return types, and examples.
-
-## Getting Started
-
-### Installation
-
-```bash
-# Clone repository
-git clone https://github.com/graphiti-org/lifesciences-research.git
-cd lifesciences-research
-
-# Install with uv (recommended)
-uv pip install -e .
-
-# Or with pip
-pip install -e .
-
-# Optional: Set API keys for BioGRID, DrugBank
-export BIOGRID_API_KEY=your_biogrid_key_here
-export DRUGBANK_API_KEY=your_drugbank_key_here  # Commercial license required
-```
-
-### Basic Usage
-
-**Example 1: Python Client Library (Direct Usage)**
-
-```python
-import asyncio
-from lifesciences_mcp import HGNCClient, UniProtClient
-
-async def main():
-    # Phase 1: Fuzzy search
-    async with HGNCClient() as hgnc:
-        search_result = await hgnc.search_genes("BRCA1", page_size=5)
-
-        # Handle errors
-        if hasattr(search_result, 'error'):
-            print(f"Error: {search_result.error.recovery_hint}")
-            return
-
-        # Review candidates
-        print("Search Results:")
-        for candidate in search_result.items:
-            print(f"  {candidate.id}: {candidate.symbol} (score={candidate.score})")
-
-        # Phase 2: Strict lookup
-        gene_id = search_result.items[0].id  # HGNC:1100
-        gene = await hgnc.get_gene(gene_id)
-
-        print(f"\nGene: {gene.symbol}")
-        print(f"Location: {gene.location}")
-        print(f"UniProt IDs: {gene.cross_references.uniprot}")
-
-    # Phase 3: Navigate via cross-references
-    async with UniProtClient() as uniprot:
-        uniprot_id = gene.cross_references.uniprot[0]
-        protein = await uniprot.get_protein(f"UniProtKB:{uniprot_id}")
-
-        print(f"\nProtein: {protein.name}")
-        print(f"Function: {protein.function[:200]}...")
-
-asyncio.run(main())
-```
-
-**Example 2: MCP Server Deployment (Gateway)**
-
-```bash
-# Run gateway server locally
-uv run fastmcp run src/lifesciences_mcp/servers/gateway.py
-
-# Server will expose 40+ tools at stdio transport
-# Connect with MCP client (Claude Desktop, custom agent)
-```
-
-**Example 3: Individual Server Deployment**
-
-```bash
-# Run individual HGNC server
-uv run fastmcp run src/lifesciences_mcp/servers/hgnc.py
-
-# Or UniProt server
-uv run fastmcp run src/lifesciences_mcp/servers/uniprot.py
-```
-
-### Common Patterns
-
-**Pattern 1: Entity Resolution (Fuzzy-to-Fact)**
-
-```python
-async with HGNCClient() as client:
-    # Search with natural language
-    results = await client.search_genes("p53 tumor suppressor")
-
-    # Select top candidate
-    if results.items:
-        gene_id = results.items[0].id  # HGNC:11998
-
-        # Fetch complete record
-        gene = await client.get_gene(gene_id)
-        print(f"Resolved: {gene.symbol} ({gene.name})")
-```
-
-**Pattern 2: Cross-Database Navigation**
-
-```python
-# Start with gene, navigate to protein, then compounds
-async with HGNCClient() as hgnc, UniProtClient() as uniprot, ChEMBLClient() as chembl:
-    gene = await hgnc.get_gene("HGNC:11998")  # TP53
-    uniprot_id = gene.cross_references.uniprot[0]
-
-    protein = await uniprot.get_protein(f"UniProtKB:{uniprot_id}")
-    chembl_id = protein.cross_references.chembl
-
-    compound = await chembl.get_compound(chembl_id)
-    print(f"Found drug: {compound['name']}")
-```
-
-**Pattern 3: Batch Operations**
-
-```python
-async with ChEMBLClient() as client:
-    # Fetch 100 compounds in single API call
-    compounds = await client.get_compounds_batch([
-        "CHEMBL:25", "CHEMBL:939", "CHEMBL:521686", ...
-    ], slim=True)
-
-    for compound in compounds:
-        print(f"{compound['id']}: {compound['name']}")
-```
-
-**Pattern 4: Error Recovery**
-
-```python
-async with HGNCClient() as client:
-    result = await client.get_gene("BRCA1")  # Invalid CURIE
-
-    if hasattr(result, 'error'):
-        if result.error.code == "UNRESOLVED_ENTITY":
-            # Recovery: Use fuzzy search
-            search = await client.search_genes(result.error.invalid_input)
-            gene = await client.get_gene(search.items[0].id)
-```
-
-See [API Reference - Usage Patterns](docs/04_api_reference.md#usage-patterns) for 6 complete patterns with explanations.
-
-## Documentation Index
-
-### Detailed Documents
-
-| Document | Description | Best For | Line Count |
-|----------|-------------|----------|------------|
-| [01_component_inventory.md](docs/01_component_inventory.md) | Complete inventory of 14 clients, 63+ models, 13 servers with source line references | Understanding what exists, finding specific components | 1,403 lines |
-| [02_architecture_diagrams.md](diagrams/02_architecture_diagrams.md) | Progressive disclosure diagrams (conceptual → logical → physical) with narratives | Visual understanding, onboarding architects, system context | 619 lines |
-| [03_data_flows.md](docs/03_data_flows.md) | Sequence diagrams for 5 core flows + cross-cutting concerns (error handling, pagination, cross-refs) | Understanding how data moves, troubleshooting issues, protocol details | 1,250 lines |
-| [04_api_reference.md](docs/04_api_reference.md) | Complete API documentation with client methods, MCP tools, models, examples | Implementation details, integration guide, quick reference | 2,070 lines |
-
-### Quick Links
-
-**Public API:**
-- [Client Classes](docs/04_api_reference.md#client-classes) - HGNCClient, UniProtClient, ChEMBLClient, etc.
-- [Model Classes](docs/04_api_reference.md#model-classes) - Gene, Protein, Compound, Trial, Pathway
-- [Envelope Models](docs/04_api_reference.md#envelope-models) - PaginationEnvelope, ErrorEnvelope
-
-**MCP Tools:**
-- [Gene Tools](docs/04_api_reference.md#gene-tools) - 8 tools across HGNC, Ensembl, Entrez
-- [Protein Tools](docs/04_api_reference.md#protein-tools) - 5 tools for UniProt, STRING, BioGRID
-- [Compound Tools](docs/04_api_reference.md#compound-tools) - 9 tools across ChEMBL, PubChem, IUPHAR, DrugBank
-- [Clinical Trial Tools](docs/04_api_reference.md#clinical-trial-tools) - 3 tools for ClinicalTrials.gov
-
-**Architecture:**
-- [Conceptual Layer](diagrams/02_architecture_diagrams.md#layer-1-conceptual-architecture) - System context and Fuzzy-to-Fact protocol
-- [Logical Layer](diagrams/02_architecture_diagrams.md#layer-2-logical-architecture) - Component types and patterns
-- [Physical Layer](diagrams/02_architecture_diagrams.md#layer-3-physical-architecture) - File structure and dependencies
-
-**Data Flows:**
-- [Simple Query Flow](docs/03_data_flows.md#1-simple-query-flow) - Basic Fuzzy-to-Fact sequence
-- [Cross-Reference Navigation](docs/03_data_flows.md#2-interactive-client-session-flow) - Multi-database triangulation
-- [Error Handling](docs/03_data_flows.md#error-handling-flow) - 6 error codes with recovery hints
-- [Pagination](docs/03_data_flows.md#pagination-flow) - Cursor-based pagination mechanics
-
-**Component Inventory:**
-- [Public API Exports](docs/01_component_inventory.md#public-api) - Package-level imports
-- [Client Layer](docs/01_component_inventory.md#client-package-lifesciences_mcpclients) - 14 clients with rate limiting
-- [Model Layer](docs/01_component_inventory.md#model-package-lifesciences_mcpmodels) - 63+ Pydantic models
-- [Server Layer](docs/01_component_inventory.md#server-package-lifesciences_mcpservers) - 13 FastMCP servers
-
-## Key Insights
-
-### Architectural Strengths
-
-**1. Hallucination Prevention through Protocol Enforcement**
-The Fuzzy-to-Fact protocol is enforced at the type system level: strict lookup methods accept `str` parameters but validate with regex patterns (e.g., `^HGNC:\d+$`). Invalid CURIEs trigger `UNRESOLVED_ENTITY` error before any API call, making it structurally impossible for agents to bypass entity resolution. This is superior to documentation-based guidance which can be ignored.
-
-**2. Entity Triangulation via Cross-Reference Registry**
-The 22-key standardized registry enables systematic validation across databases. When an agent queries TP53 from three sources, it can verify that HGNC's `cross_references.uniprot` matches UniProt's `cross_references.hgnc`, detecting data quality issues automatically. This transforms cross-references from passive metadata into active validation mechanisms.
-
-**3. Zero-Overhead Gateway Composition**
-The gateway's use of `as_proxy=False` enables direct Python function calls between gateway and domain servers (no HTTP serialization/deserialization). This provides the benefits of microservices architecture (independent testing, evolution) without the performance penalty of network communication. 40+ tools exposed through single endpoint with no latency overhead.
-
-**4. Schema Determinism for Agent Reliability**
-All 40+ tools use two response types: `PaginationEnvelope[T]` for lists, `ErrorEnvelope` for errors. Agents can write a single error handling routine that works across all databases, rather than learning 12 different error schemas. This dramatically simplifies agent logic and reduces token usage for system prompts.
-
-**5. Progressive Disclosure for Token Budget Optimization**
-The slim/full mode pattern enables agents to review many candidates efficiently: 50 search results in slim mode = ~1K tokens vs ~15K in full mode (93% reduction). Agents can implement broad search → narrow selection → detailed fetch workflows without context overflow, critical for multi-hop reasoning.
-
-### Design Patterns Used
-
-**Gateway/Facade Pattern**
-Gateway server composes 12 domain servers into unified interface. See [gateway.py:52-109](docs/01_component_inventory.md#gateway-server-unified-access).
-
-**Repository Pattern**
-Each client acts as repository for its domain (HGNCClient = gene repository, UniProtClient = protein repository) with standard search/get interface. See [Client Layer](docs/01_component_inventory.md#client-package-lifesciences_mcpclients).
-
-**Envelope/Result Pattern**
-All operations return `Result<PaginationEnvelope<T>, ErrorEnvelope>` discriminated union. Agents check `hasattr(result, 'error')` to branch. See [Envelope Models](docs/04_api_reference.md#envelope-models).
-
-**Factory Method Pattern**
-ErrorEnvelope provides static factory methods for each error code (`ErrorEnvelope.unresolved_entity()`, `ErrorEnvelope.rate_limited()`). See [ErrorEnvelope](docs/04_api_reference.md#errorenvelope).
-
-**Singleton Pattern**
-Each server module maintains singleton client instance (`_client = None` at module level) initialized on first tool call. Enables connection pooling across multiple tool invocations. See [Server Layer](docs/01_component_inventory.md#server-package-lifesciences_mcpservers).
-
-**Strategy Pattern**
-Rate limiting strategy varies by client: HGNC uses 100ms delay with exponential backoff, UniProt uses lock-based limiting with thundering herd prevention. Each client implements `_rate_limited_get()` with database-specific strategy. See [Rate Limiting Strategy](docs/01_component_inventory.md#architecture-patterns).
-
-**Template Method Pattern**
-Base client defines HTTP lifecycle (connection pooling, timeouts, cleanup), subclasses override rate limiting and cross-reference mapping. See [LifeSciencesClient](docs/04_api_reference.md#lifesciencesclient).
-
-**Adapter Pattern**
-ChEMBLClient wraps synchronous `chembl_webresource_client` SDK with async interface using `asyncio.run_in_executor()`. See [ChEMBL SDK Wrapping](docs/03_data_flows.md#2-interactive-client-session-flow).
-
-### Performance Considerations
-
-**Rate Limiting Calibration**
-Each client implements database-specific rate limits based on API documentation: HGNC (10 req/s), Ensembl (15 req/s), WikiPathways (1 req/s conservative), DrugBank (30 req/s commercial tier). All implement exponential backoff on 429 errors (3 retries, 2^attempt delay). See [Rate Limiting Strategy](docs/01_component_inventory.md#architecture-patterns).
-
-**Connection Pooling**
-Base client configures httpx.AsyncClient with `max_connections=10` per client instance. Since each server uses singleton client, this enables efficient connection reuse across multiple tool calls. Total max connections = 10 × 14 clients = 140 concurrent.
-
-**Client-Side Pagination**
-HGNC and ChEMBL don't support server-side pagination, so clients fetch all results and slice client-side. Cursors encode offset as base64 JSON for stateless pagination. Trade-off: higher latency on first page, but enables total_count and consistent pagination API. See [Pagination Flow](docs/03_data_flows.md#pagination-flow).
-
-**Batch Operations**
-ChEMBL provides `get_compounds_batch()` accepting up to 100 CURIEs in single API call. Prevents thread pool exhaustion from sequential lookups and reduces total latency (1 API call vs 100). Returns results in same order as input with individual error handling. See [Batch Operations](docs/04_api_reference.md#chemblclient).
-
-**Token Budget Optimization**
-Slim mode reduces response size by 80-95% by returning only id/name/score fields. Example: Gene model in full mode = ~300 tokens, SearchCandidate in slim mode = ~20 tokens (93% reduction). Critical for multi-hop workflows to avoid context overflow. See [Token Budgets](docs/04_api_reference.md#performance-benchmarks).
-
-**Lazy Initialization**
-Servers use lazy client initialization (singleton created on first tool call) to avoid allocating resources for unused servers. Gateway server imports all 12 server modules but clients only instantiate when tools are actually called.
-
-**Thundering Herd Prevention**
-UniProtClient rate limiting uses double-check pattern: acquire lock, re-check time elapsed since last request (another thread may have made request while waiting for lock), then enforce 100ms delay. Prevents multiple threads from bursting requests after lock release. See [Rate Limiting](docs/03_data_flows.md#1-simple-query-flow).
-
-## Appendix
-
-### Glossary
-
-| Term | Definition |
-|------|------------|
-| **CURIE** | Compact URI - standardized identifier format with prefix and local ID (e.g., `HGNC:1100`, `UniProtKB:P04637`) |
-| **Fuzzy-to-Fact** | Two-phase resolution protocol: (1) fuzzy search returns ranked candidates, (2) strict lookup requires validated CURIE |
-| **Cross-Reference** | External database identifier stored in standardized 22-key registry enabling entity triangulation |
-| **Envelope** | Standardized response wrapper (PaginationEnvelope for lists, ErrorEnvelope for errors) providing schema determinism |
-| **Slim Mode** | Response mode returning minimal fields (id, name, score) for token efficiency (~20 tokens vs ~300 in full mode) |
-| **MCP** | Model Context Protocol - Anthropic's standard for exposing tools to AI agents via JSON-RPC 2.0 |
-| **FastMCP** | Python framework for building MCP servers with auto-schema generation from Pydantic types |
-| **Agentic Biolink** | 22-key cross-reference schema standardizing identifiers across biological databases |
-| **HGNC** | HUGO Gene Nomenclature Committee - authoritative source for human gene symbols and nomenclature |
-| **UniProt** | Universal Protein Resource - comprehensive protein sequence and annotation database |
-| **ChEMBL** | Manually curated database of bioactive drug-like small molecules with binding, functional, ADMET data |
-| **Open Targets** | Platform integrating target-disease evidence from genetics, genomics, transcriptomics, drugs, animal models, literature |
-| **STRING** | Protein-Protein Interaction Networks database with confidence scores from experimental, database, textmining evidence |
-| **BioGRID** | Biological General Repository for Interaction Datasets - genetic and protein interactions |
-| **Ensembl** | Genome browser with gene annotations, variants, regulatory features, comparative genomics |
-| **Entrez** | NCBI's integrated search system across PubMed, Gene, Protein, Nucleotide, Structure databases |
-| **PubChem** | Open chemistry database from NIH with compound structures, properties, bioactivities |
-| **IUPHAR/GtoPdb** | Guide to Pharmacology - expert-curated pharmacological interactions between ligands and targets |
-| **WikiPathways** | Open collaborative pathway database with GPML (Graphical Pathway Markup Language) format |
-| **ClinicalTrials.gov** | NIH registry of clinical trials worldwide with protocols, eligibility, outcomes, locations |
-| **DrugBank** | Comprehensive drug database combining chemical, pharmacological, pharmaceutical data (commercial license) |
-| **Rate Limiting** | Throttling HTTP requests to respect API limits (e.g., 10 req/s for HGNC) with exponential backoff on 429 errors |
-| **Connection Pooling** | Reusing HTTP connections across multiple requests (httpx.AsyncClient with max_connections=10) |
-| **Pagination** | Breaking large result sets into pages using opaque cursors (base64-encoded offset or API-provided cursor) |
-| **Exponential Backoff** | Retry strategy with exponentially increasing delays (2^attempt seconds) for transient errors |
-| **Thundering Herd** | Problem where multiple threads burst requests simultaneously after waiting on lock (prevented via time re-check) |
-| **Triangulation** | Validating entity identity by verifying cross-references are bidirectional across multiple databases |
-| **OMIM** | Online Mendelian Inheritance in Man - catalog of human genes and genetic phenotypes |
-| **Ensembl Gene ID** | Format: ENSG + 11 digits (e.g., ENSG00000012048) |
-| **Ensembl Transcript ID** | Format: ENST + 11 digits (e.g., ENST00000357654) |
-| **RefSeq** | NCBI Reference Sequence database with format [NX][MR]_NNNNN (e.g., NM_007294) |
-| **PDB** | Protein Data Bank - structural biology database with 3D protein structures |
-| **SMILES** | Simplified Molecular Input Line Entry System - line notation for chemical structures |
-| **InChI** | International Chemical Identifier - textual identifier for chemical substances |
-
-### External Resources
-
-**Integrated APIs Documentation:**
-- [HGNC REST API](https://www.genenames.org/help/rest/) - Gene nomenclature and symbol resolution
-- [UniProt REST API](https://www.uniprot.org/help/api) - Protein sequences and annotations
-- [ChEMBL Web Services](https://www.ebi.ac.uk/chembl/ws) - Bioactivity data and drug-like molecules
-- [Open Targets Platform API](https://platform-docs.opentargets.org/data-access/graphql-api) - Target-disease associations
-- [STRING API](https://string-db.org/help/api/) - Protein-protein interaction networks
-- [BioGRID API](https://wiki.thebiogrid.org/doku.php/biogridrest) - Genetic and protein interactions
-- [Ensembl REST API](https://rest.ensembl.org/) - Genomic annotations and variants
-- [NCBI E-utilities](https://www.ncbi.nlm.nih.gov/books/NBK25501/) - Entrez programming utilities
-- [PubChem PUG REST](https://pubchem.ncbi.nlm.nih.gov/docs/pug-rest) - Chemical compound data
-- [IUPHAR/GtoPdb API](https://www.guidetopharmacology.org/webServices.jsp) - Pharmacological data
-- [WikiPathways API](https://www.wikipathways.org/api/api.php) - Pathway data and GPML
-- [ClinicalTrials.gov API v2](https://clinicaltrials.gov/api/gui) - Clinical trial data
-
-**Framework Documentation:**
-- [FastMCP Documentation](https://github.com/jlowin/fastmcp) - MCP server framework
-- [Pydantic Documentation](https://docs.pydantic.dev/) - Data validation and settings
-- [httpx Documentation](https://www.python-httpx.org/) - Async HTTP client
-- [Model Context Protocol Specification](https://modelcontextprotocol.io/) - MCP protocol spec
-
-**Project Documentation:**
-- [ADR-001: Agentic Biolink Architecture](../docs/adr/accepted/adr-001-v1.2.md) - Architecture decision record
-- [Constitution v1.1.0](../docs/CONSTITUTION.md) - Design principles and constraints
-- [Project README](../README.md) - Setup, deployment, contribution guide
+# Life Sciences MCP - Repository Architecture Documentation
+
+## Overview
+
+The **Life Sciences MCP (Model Context Protocol)** is a comprehensive biological data integration platform that provides unified access to 13+ life sciences databases through a standardized, agent-friendly API. Built on the FastMCP framework, it implements a sophisticated "Fuzzy-to-Fact" protocol that prevents hallucination by enforcing two-phase entity resolution: fuzzy search returns ranked candidates, followed by strict CURIE-based lookups for complete records.
+
+### What It Is
+
+A production-ready MCP server platform that:
+- Integrates 13 major biological databases (HGNC, UniProt, ChEMBL, Ensembl, Open Targets, STRING, BioGRID, Entrez, PubChem, IUPHAR, WikiPathways, ClinicalTrials.gov)
+- Exposes 34+ MCP tools through a unified gateway server
+- Provides type-safe Pydantic models with comprehensive cross-reference linking
+- Implements robust error handling with agent-actionable recovery hints
+- Features intelligent rate limiting, connection pooling, and exponential backoff
+
+### Key Features
+
+- **Fuzzy-to-Fact Protocol**: Two-phase workflow prevents agents from using ambiguous identifiers
+- **22-Key Cross-Reference Registry**: Navigate seamlessly across databases using standardized identifiers
+- **Unified Gateway**: Single deployment endpoint composing all 13 servers without proxy overhead
+- **Rate Limiting & Resilience**: 10 req/s throttling, exponential backoff, thundering herd prevention
+- **Token Efficiency**: Slim mode reduces responses from ~300 to ~20 tokens per entity
+- **Batch Operations**: Single API calls for multiple entities (up to 100 compounds)
+- **Comprehensive Error Recovery**: Structured errors with recovery hints for autonomous correction
+
+### Code Statistics
+
+- **13 API clients** (~8,162 lines of code)
+- **18 Pydantic model files** (~3,403 lines of code)
+- **14 MCP server implementations** (13 operational + 1 gateway)
+- **34+ MCP tools** across 13 databases
+- **500+ integration tests** with comprehensive coverage
+- **22-key cross-reference registry** enabling cross-database navigation
 
 ---
 
-**Generated:** 2026-01-05
-**Documentation Version:** 1.0.0
-**Covers:** lifesciences-research (commit 8356f3a)
-**Source Files:** 13,756 lines of production code (client: 8,162, model: 3,403, server: 2,191)
-**Test Coverage:** 500+ integration and unit tests
-**Deployment:** FastMCP Cloud at https://lifesciences.fastmcp.app/mcp
+## Quick Start
+
+### How to Use This Documentation
+
+This documentation set is organized as a comprehensive reference for understanding and working with the Life Sciences MCP architecture:
+
+1. **Start here (README)** for high-level overview and navigation guide
+2. **[Component Inventory](docs/01_component_inventory.md)** for detailed API surface and implementation details
+3. **[Architecture Diagrams](diagrams/02_architecture_diagrams.md)** for visual representations of system structure
+4. **[Data Flow Analysis](docs/03_data_flows.md)** for understanding request/response patterns
+5. **[API Reference](docs/04_api_reference.md)** for complete API documentation with examples
+
+### For Different Audiences
+
+#### Developers
+**Start with:**
+1. [Component Inventory](docs/01_component_inventory.md) - Understand the codebase structure
+2. [API Reference](docs/04_api_reference.md) - Learn the client APIs and data models
+3. [Data Flow Analysis](docs/03_data_flows.md#1-fuzzy-to-fact-protocol-flow) - Master the Fuzzy-to-Fact pattern
+
+**Key concepts:**
+- Async/await patterns with connection pooling
+- Pydantic model validation and serialization
+- Error handling with ErrorEnvelope
+- Rate limiting with asyncio.Lock
+
+#### Architects
+**Start with:**
+1. [Architecture Diagrams](diagrams/02_architecture_diagrams.md#system-architecture) - System overview
+2. This README's [Architecture at a Glance](#architecture-at-a-glance) section
+3. [Data Flow Analysis](docs/03_data_flows.md) - Understanding workflow patterns
+
+**Key concepts:**
+- 4-layer architecture (Models → Clients → Servers → Gateway)
+- Gateway composition pattern (as_proxy=False)
+- Module-level singleton lifecycle
+- Cross-reference mapping strategies
+
+#### Contributors
+**Start with:**
+1. [Component Inventory](docs/01_component_inventory.md#public-api) - Public API surface
+2. [API Reference](docs/04_api_reference.md) - Usage patterns and best practices
+3. [Data Flow Analysis](docs/03_data_flows.md#2-rate-limited-api-client-flow) - Rate limiting implementation
+
+**Key concepts:**
+- Client inheritance from LifeSciencesClient
+- Cross-reference building patterns
+- CURIE validation with regex patterns
+- Batch operation implementation
+
+#### Users
+**Start with:**
+1. [API Reference](docs/04_api_reference.md#overview) - Getting started with clients
+2. [Data Flow Analysis](docs/03_data_flows.md#1-fuzzy-to-fact-protocol-flow) - Understanding the workflow
+3. [API Reference](docs/04_api_reference.md#usage-patterns-and-best-practices) - Common use cases
+
+**Key concepts:**
+- Fuzzy-to-Fact protocol (search → get)
+- Cross-database navigation with cross_references
+- Error recovery using recovery hints
+- Context manager usage for cleanup
+
+---
+
+## Architecture at a Glance
+
+### System Architecture
+
+The Life Sciences MCP follows a **4-layer architecture** implementing the Model Context Protocol:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     ORCHESTRATION LAYER                      │
+│  UnifiedSearch Aggregator (Multi-DB queries, re-ranking)    │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                       SERVER LAYER                           │
+│  Gateway Server (Unified Entry Point)                       │
+│  ├── HGNC Server        ├── STRING Server                   │
+│  ├── UniProt Server     ├── BioGRID Server                  │
+│  ├── ChEMBL Server      ├── Ensembl Server                  │
+│  ├── OpenTargets Server ├── Entrez Server                   │
+│  ├── PubChem Server     ├── IUPHAR Server                   │
+│  ├── WikiPathways Server└── ClinicalTrials Server           │
+│  (34+ MCP Tools)                                             │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                       CLIENT LAYER                           │
+│  13 Specialized API Clients (Inherit from LifeSciencesClient)│
+│  - Async HTTP with connection pooling                       │
+│  - Rate limiting (10 req/s) + exponential backoff           │
+│  - Fuzzy-to-Fact protocol implementation                    │
+│  - Cross-reference mapping to 22-key registry               │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                      DATA MODEL LAYER                        │
+│  18 Pydantic Model Files                                    │
+│  - Gene, Protein, Compound, Target, Pathway, Trial          │
+│  - CrossReferences (22-key registry)                        │
+│  - PaginationEnvelope, ErrorEnvelope                        │
+│  - Provenance, MCPClaim                                     │
+│  (CURIE validation, omit-if-null pattern)                   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Data Flow:**
+```
+External APIs → Clients → Models ← Servers → Gateway
+                    ↓
+              Aggregator (Orchestration)
+```
+
+### Layer Purposes
+
+1. **Data Model Layer** (Foundation)
+   - Pure Pydantic models with no external dependencies
+   - CURIE format validation using regex patterns
+   - 22-key cross-reference registry for database linking
+   - Omit-if-null pattern reduces token usage
+
+2. **Client Layer** (API Access)
+   - Async HTTP clients inheriting from `LifeSciencesClient`
+   - Rate limiting with lock-based throttling (10 req/s)
+   - Exponential backoff for 429/503 errors
+   - Response transformation to Pydantic models
+
+3. **Server Layer** (MCP Interface)
+   - FastMCP servers exposing tools for each database
+   - Thin wrapper: receives MCP calls → delegates to client
+   - Gateway composes all 13 servers using direct mounting
+   - No business logic (just routing)
+
+4. **Orchestration Layer** (Experimental)
+   - UnifiedSearch aggregator for multi-database queries
+   - Result re-ranking with heuristics
+   - Entity resolution across databases
+
+---
+
+## Key Design Principles
+
+The architecture is built on several foundational patterns that enable robust, scalable biological data integration:
+
+### 1. Fuzzy-to-Fact Protocol
+
+**The Core Pattern:** Two-phase entity resolution prevents agents from hallucinating identifiers.
+
+**Phase 1: Fuzzy Search** (`search_*` tools)
+- Input: Natural language query (e.g., "p53", "breast cancer gene")
+- Output: Ranked `SearchCandidate` list with validated CURIEs and scores
+- Features: Alias boosting, position-based scoring, pagination
+
+**Phase 2: Fact Retrieval** (`get_*` tools)
+- Input: Validated CURIE from Phase 1 (e.g., "HGNC:11998")
+- Output: Complete entity with all fields and cross-references
+- Validation: Strict CURIE format checking before API calls
+
+**Why it matters:** Agents cannot use ambiguous identifiers. They must resolve to a CURIE before accessing facts.
+
+**Example:**
+```python
+# Phase 1: Fuzzy search
+results = await client.search_genes("p53")
+# Returns: [{"id": "HGNC:11998", "symbol": "TP53", "score": 1.0}, ...]
+
+# Agent selects best match based on score
+top_match = results.items[0].id  # "HGNC:11998"
+
+# Phase 2: Fact retrieval with validated CURIE
+gene = await client.get_gene("HGNC:11998")
+# Returns: Full Gene object with cross_references
+```
+
+**Error Prevention:**
+```python
+# Agent tries: get_gene("BRCA1") - NO CURIE!
+# Result: UNRESOLVED_ENTITY error
+# Recovery hint: "Call search_genes to resolve the identifier first."
+```
+
+### 2. Rate Limiting Strategies
+
+**Implementation:** Lock-based rate limiting with thundering herd prevention
+
+**Pattern:**
+1. Acquire `asyncio.Lock()` for request serialization
+2. Check elapsed time since last request
+3. If elapsed < RATE_LIMIT_DELAY, sleep remaining time
+4. Execute HTTP request
+5. Update `_last_request_time`
+6. Release lock
+
+**Thundering Herd Prevention:**
+```python
+async with self._lock:  # Multiple requests queued
+    # Re-check timing AFTER acquiring lock
+    elapsed = time.time() - self._last_request_time
+    if elapsed < RATE_LIMIT_DELAY:
+        await asyncio.sleep(RATE_LIMIT_DELAY - elapsed)
+    # Now safe to proceed
+```
+
+**Exponential Backoff:**
+- On 429/503 errors: wait = retry_after or 2^attempt seconds
+- Sleep OUTSIDE lock to allow other requests to proceed
+- Maximum 3 retry attempts (configurable)
+
+**Rate Limits by Database:**
+- HGNC, UniProt, ChEMBL, Open Targets: 10 req/s (100ms delay)
+- Ensembl: 15 req/s (67ms delay)
+- STRING, ClinicalTrials: 1 req/s (1000ms delay)
+
+### 3. Error Recovery Patterns
+
+**Canonical Error Codes:** 5 standardized codes with actionable recovery hints
+
+| Code | Scenario | Recovery Hint |
+|------|----------|---------------|
+| `UNRESOLVED_ENTITY` | Raw string to get_* | "Call search_genes to resolve identifier first." |
+| `ENTITY_NOT_FOUND` | Valid CURIE, no record | "Verify CURIE spelling or try alternate database." |
+| `AMBIGUOUS_QUERY` | Query too broad/short | "Refine query with more specific terms." |
+| `RATE_LIMITED` | Too many requests | "Retry after 60 seconds." |
+| `UPSTREAM_ERROR` | API failure | "HGNC API may be temporarily unavailable. Retry later." |
+
+**Error Envelope Structure:**
+```json
+{
+  "success": false,
+  "error": {
+    "code": "UNRESOLVED_ENTITY",
+    "message": "The input 'brca1' is not a valid HGNC CURIE.",
+    "recovery_hint": "Call search_genes to resolve the identifier first.",
+    "invalid_input": "brca1"
+  }
+}
+```
+
+**Agent Self-Correction Workflow:**
+1. Receive ErrorEnvelope instead of expected data
+2. Read `error.recovery_hint` field
+3. Parse hint and determine corrective action
+4. Call suggested tool with corrected input
+5. Succeed with valid data
+
+### 4. Cross-Reference System
+
+**22-Key Registry:** Standardized cross-reference identifiers across all databases
+
+**Core Categories:**
+
+**Gene/Protein:**
+- `ensembl_gene`, `ensembl_transcript` (genomic data)
+- `uniprot` (protein data)
+- `entrez` (NCBI gene database)
+- `refseq` (reference sequences)
+- `hgnc` (gene nomenclature)
+
+**Disease/Phenotype:**
+- `omim` (genetic disorders)
+- `orphanet` (rare diseases)
+- `mondo` (disease ontology)
+- `efo` (experimental factors)
+
+**Drug/Compound:**
+- `chembl` (bioactivity)
+- `drugbank` (drug data)
+- `pubchem_compound`, `pubchem_substance` (chemical data)
+
+**Pathway/Interaction:**
+- `kegg`, `kegg_pathway` (metabolic pathways)
+- `string` (protein interactions)
+- `biogrid` (genetic interactions)
+- `iuphar` (pharmacology)
+
+**Structural:**
+- `pdb` (3D structures)
+
+**Omit-if-Null Pattern:**
+```python
+# Keys with no value are excluded from JSON
+gene.cross_references.model_dump()
+# {"ensembl_gene": "ENSG00000141510", "uniprot": ["P04637"]}
+# NOT: {"ensembl_gene": "...", "uniprot": [...], "omim": null, ...}
+```
+
+**Cross-Database Navigation:**
+```python
+# Start with HGNC gene
+gene = await hgnc.get_gene("HGNC:11998")
+
+# Navigate to UniProt protein
+uniprot_id = f"UniProtKB:{gene.cross_references.uniprot[0]}"
+protein = await uniprot.get_protein(uniprot_id)
+
+# Navigate to Ensembl genomics
+ensembl_id = gene.cross_references.ensembl_gene
+ensembl_gene = await ensembl.get_gene(ensembl_id)
+
+# Navigate to PDB structures
+pdb_ids = protein.cross_references.pdb  # ["1TUP", "1TSR", ...]
+```
+
+### 5. Slim Mode for Token Efficiency
+
+**Problem:** Full entities can consume 300+ tokens each
+
+**Solution:** Optional `slim=True` parameter reduces to ~20 tokens
+
+**Example:**
+```python
+# Full mode: ~300 tokens
+gene = await client.get_gene("HGNC:11998")
+# {id, symbol, name, status, locus_type, location, aliases,
+#  prev_symbols, cross_references{22 keys}}
+
+# Slim mode: ~20 tokens
+gene = await client.get_gene("HGNC:11998", slim=True)
+# {id, symbol, name}
+```
+
+**Use Cases:**
+- Batch operations (default slim=True)
+- Exploratory searches with many candidates
+- Building candidate lists for ranking
+- Token budget management
+
+### 6. Gateway Composition Pattern
+
+**Direct Mounting (as_proxy=False):** No proxy overhead, direct function calls
+
+**Pattern:**
+```python
+# Import all server instances
+from lifesciences_mcp.servers.hgnc import mcp as hgnc_mcp
+from lifesciences_mcp.servers.uniprot import mcp as uniprot_mcp
+# ... 11 more
+
+# Create gateway
+gateway_mcp = FastMCP("Life Sciences MCP Gateway")
+
+# Mount with direct composition
+gateway_mcp.mount(hgnc_mcp, prefix="hgnc", as_proxy=False,
+                 tool_names={"search_genes": "hgnc_search_genes",
+                            "get_gene": "hgnc_get_gene"})
+```
+
+**Benefits:**
+- Single deployment artifact
+- Shared connection pools per client type
+- No serialization overhead between servers
+- Unified error handling
+- Automatic tool discovery
+
+**Tool Naming:** All tools prefixed with database name to avoid collisions
+- `hgnc_search_genes`, `hgnc_get_gene`
+- `uniprot_search_proteins`, `uniprot_get_protein`
+- `chembl_search_compounds`, `chembl_get_compound`, `chembl_get_compounds_batch`
+
+---
+
+## Component Overview
+
+### Client Layer
+
+**13 Specialized API Clients** inheriting from `LifeSciencesClient` base class
+
+**Base Class Features:**
+- Async HTTP client with connection pooling (httpx.AsyncClient)
+- Configurable timeout (default: 30s) and max connections (default: 10)
+- Lazy initialization: HTTP client created on first request
+- Context manager support for automatic cleanup
+
+**Client Implementations:**
+
+1. **HGNCClient** - Gene Nomenclature
+   - Alias boosting ("p53" → "TP53")
+   - 10 req/s rate limiting
+   - 353 lines of code
+
+2. **UniProtClient** - Protein Data
+   - Field selection for slim mode
+   - Server-side pagination cursors
+   - 461 lines of code
+
+3. **ChEMBLClient** - Compound Bioactivity
+   - Synchronous SDK wrapped with ThreadPoolExecutor
+   - Batch operations (up to 100 compounds)
+   - Indication fetching
+   - 681 lines of code
+
+4. **OpenTargetsClient** - Target-Disease Associations
+   - GraphQL query execution
+   - Evidence aggregation
+   - Association scoring
+
+5. **STRINGClient** - Protein Interactions
+   - Network image URL generation
+   - Confidence score filtering
+   - 1 req/s rate limiting
+
+6. **BioGRIDClient** - Genetic Interactions
+   - Interaction type filtering
+   - Organism-specific queries
+
+7. **EnsemblClient** - Genomic Data
+   - Species aliasing ("human" → "homo_sapiens")
+   - Transcript expansion
+   - 15 req/s rate limiting
+
+8. **EntrezClient** - NCBI Gene Database
+   - XML parsing with defusedxml
+   - PubMed literature links
+
+9. **PubChemClient** - Chemical Compounds
+   - Molecular formula search
+   - Structure data (SMILES, InChI)
+
+10. **IUPHARClient** - Pharmacology
+    - Ligand and target search
+    - Receptor/ion channel data
+
+11. **WikiPathwaysClient** - Biological Pathways
+    - Pathway component extraction
+    - Gene-to-pathway mapping
+
+12. **ClinicalTrialsClient** - Clinical Trials
+    - Trial location data
+    - Eligibility criteria
+
+13. **DrugBankClient** - Drug Data (Not in Gateway)
+    - Requires commercial API key
+    - Drug-target interactions
+
+**Common Client Pattern:**
+```python
+async with ClientClass() as client:
+    # Phase 1: Fuzzy search
+    results = await client.search_*(query, slim=False, cursor=None, page_size=50)
+
+    # Phase 2: Fact retrieval
+    entity = await client.get_*(curie, slim=False)
+```
+
+### Data Model Layer
+
+**18 Pydantic Model Files** (~3,403 lines of code)
+
+**Core Entity Models:**
+
+1. **Gene** (gene.py)
+   - Fields: id, symbol, name, status, locus_type, location, aliases
+   - CrossReferences with 22-key registry
+   - CURIE pattern: `HGNC:\d+`
+
+2. **Protein** (protein.py)
+   - Fields: id, accession, name, organism, function, sequence_length
+   - Gene name mapping
+   - CURIE pattern: `UniProtKB:[A-Z][A-Z0-9]{5,9}`
+
+3. **Compound** (compound.py)
+   - Fields: id, name, molecular_formula, smiles, inchi, max_phase
+   - Indication list (approved uses)
+   - CURIE pattern: `CHEMBL:[0-9]+`
+
+4. **Target** (target.py)
+   - Fields: id, approved_symbol, biotype, description
+   - Association list with scores
+   - CURIE pattern: `ENSG\d{11}`
+
+5. **EnsemblGene** (ensembl.py)
+   - Fields: id, symbol, chromosome, start, end, strand
+   - Transcript list
+   - Assembly information
+
+6. **Pathway** (pathway.py)
+   - Fields: id, name, organism, description
+   - Component counts (genes, metabolites, pathways)
+
+7. **Trial** (trial.py)
+   - Fields: nct_id, title, status, phase, sponsor
+   - Eligibility criteria
+   - Outcome measures
+
+**Search Candidate Models:**
+- Lightweight representations (~20 tokens)
+- Fields: id, name/symbol, score
+- Used in Phase 1 (Fuzzy Search) responses
+
+**Support Models:**
+
+1. **CrossReferences** (gene.py)
+   - 22-key registry for database linking
+   - Omit-if-null pattern
+   - Per-field validation
+
+2. **PaginationEnvelope** (envelopes.py)
+   - Generic type: `PaginationEnvelope[T]`
+   - Fields: items (list[T]), pagination metadata
+   - Cursor-based pagination
+
+3. **ErrorEnvelope** (envelopes.py)
+   - Fields: success=False, error (ErrorDetail)
+   - Factory methods for each error code
+   - Recovery hints for agents
+
+4. **Provenance** (provenance.py)
+   - Fields: source, timestamp, curie, api_version, confidence
+   - Citation generation
+   - Data lineage tracking
+
+### Server Layer
+
+**14 MCP Server Implementations** (13 operational + 1 gateway)
+
+**Server Pattern:**
+```python
+from fastmcp import FastMCP
+
+mcp = FastMCP("Database Name Server")
+
+# Module-level singleton
+_client: ClientClass | None = None
+
+async def get_client() -> ClientClass:
+    global _client
+    if _client is None:
+        _client = ClientClass()
+    return _client
+
+@mcp.tool
+async def search_*(query: str, ...) -> PaginationEnvelope[SearchCandidate] | ErrorEnvelope:
+    client = await get_client()
+    return await client.search_*(...)
+
+@mcp.tool
+async def get_*(id: str, ...) -> Entity | ErrorEnvelope:
+    client = await get_client()
+    return await client.get_*(...)
+```
+
+**Gateway Server:**
+- Composes all 13 servers using `mcp.mount()`
+- Direct composition (as_proxy=False)
+- Prefixed tool names (e.g., `hgnc_search_genes`)
+- Single deployment endpoint
+- 112 lines of code
+
+**Individual Servers:**
+- 2-4 tools per server
+- Thin wrapper over client
+- No business logic (just delegation)
+- 80-200 lines of code each
+
+**Entry Points:**
+```bash
+# Individual server
+uv run fastmcp run src/lifesciences_mcp/servers/hgnc.py
+
+# Gateway server
+uv run fastmcp run src/lifesciences_mcp/servers/gateway.py
+
+# FastMCP Cloud deployment
+# Entrypoint: src/lifesciences_mcp/servers/gateway.py:mcp
+```
+
+### Orchestration Layer
+
+**UnifiedSearch Aggregator** (74 lines of code)
+
+**Purpose:** Experimental multi-database entity resolution
+
+**Features:**
+- Coordinates queries across HGNC, UniProt, Open Targets
+- Re-ranks results with heuristics:
+  - Exact symbol match: +2.0 score
+  - Known alias (e.g., "p53" → "TP53"): +2.0 score
+- Configurable result limits
+
+**Usage:**
+```python
+from lifesciences_agent.aggregator import UnifiedSearch
+
+searcher = UnifiedSearch()
+results = await searcher.search("p53", limit=10)
+# Returns: TP53 first due to alias boosting
+```
+
+**Status:** Prototype demonstrating cross-database orchestration patterns
+
+---
+
+## Data Flow Patterns
+
+### Core Workflows
+
+#### 1. Fuzzy-to-Fact Search
+
+**The canonical workflow for entity resolution:**
+
+```
+User Query → Agent → MCP Server → Client → External API
+                ↓
+        SearchCandidate[]
+                ↓
+Agent selects best match (by score)
+                ↓
+        Validated CURIE
+                ↓
+Agent → MCP Server → Client → External API
+                ↓
+        Complete Entity + CrossReferences
+```
+
+**Example:**
+```python
+# Step 1: Fuzzy search
+results = await hgnc.search_genes("BRCA")
+# Returns: [
+#   {"id": "HGNC:1100", "symbol": "BRCA1", "score": 1.0},
+#   {"id": "HGNC:1101", "symbol": "BRCA2", "score": 0.95}
+# ]
+
+# Step 2: Agent selects top candidate
+curie = results.items[0].id  # "HGNC:1100"
+
+# Step 3: Strict lookup with validated CURIE
+gene = await hgnc.get_gene(curie)
+# Returns: Full Gene object with all fields and cross_references
+```
+
+**Error Handling:**
+```python
+# Agent tries: get_gene("BRCA1") without CURIE
+# → UNRESOLVED_ENTITY error
+# → recovery_hint: "Call search_genes to resolve identifier first."
+# → Agent corrects by calling search_genes first
+```
+
+#### 2. Cross-Database Navigation
+
+**Workflow:**
+```
+Gene (HGNC)
+  → cross_references.uniprot
+    → Protein (UniProt)
+      → cross_references.pdb
+        → 3D Structures (PDB)
+      → cross_references.ensembl_gene
+        → Genomic Data (Ensembl)
+```
+
+**Example:**
+```python
+# Start with gene
+gene = await hgnc.get_gene("HGNC:11998")  # TP53
+
+# Navigate to protein
+uniprot_id = f"UniProtKB:{gene.cross_references.uniprot[0]}"
+protein = await uniprot.get_protein(uniprot_id)  # P04637
+
+# Navigate to structures
+pdb_ids = protein.cross_references.pdb  # ["1TUP", "1TSR", ...]
+
+# Navigate to genomic data
+ensembl_id = gene.cross_references.ensembl_gene
+ensembl_gene = await ensembl.get_gene(ensembl_id)  # ENSG00000141510
+
+# Navigate to interactions
+string_id = protein.cross_references.string
+interactions = await string_client.get_interactions(string_id)
+```
+
+#### 3. Batch Operations
+
+**Workflow:**
+```
+Search → Extract CURIEs → Batch Lookup
+  ↓           ↓              ↓
+  50 results  10 CURIEs     1 API call (vs 10)
+```
+
+**Example:**
+```python
+# Step 1: Search to get candidates
+results = await chembl.search_compounds("kinase inhibitor", page_size=20)
+
+# Step 2: Extract CURIEs
+chembl_ids = [c.id for c in results.items[:10]]
+
+# Step 3: Batch lookup (single API call)
+compounds = await chembl.get_compounds_batch(chembl_ids, slim=True)
+# Returns: 10 compounds in ~1s (vs 10s for individual lookups)
+```
+
+**Benefits:**
+- Reduces API calls by 10-100x
+- Prevents thread pool exhaustion
+- Token efficiency with slim mode
+- Handles individual failures gracefully
+
+#### 4. Error Recovery
+
+**Workflow:**
+```
+Request → ErrorEnvelope
+            ↓
+  error.recovery_hint
+            ↓
+Agent corrects action
+            ↓
+  Retry with fix → Success
+```
+
+**Example:**
+```python
+# Attempt 1: Invalid input
+result = await hgnc.get_gene("brca1")  # No CURIE prefix!
+# → ErrorEnvelope: UNRESOLVED_ENTITY
+# → recovery_hint: "Call search_genes to resolve identifier first."
+
+# Agent corrects
+search_result = await hgnc.search_genes("brca1")
+curie = search_result.items[0].id  # "HGNC:1100"
+
+# Attempt 2: Correct input
+gene = await hgnc.get_gene(curie)  # SUCCESS
+```
+
+### Integration Patterns
+
+**Pattern 1: Gene-to-Drug Discovery**
+```
+Disease (Open Targets)
+  → Associated Genes
+    → Gene Details (HGNC)
+      → Protein (UniProt)
+        → Interactions (STRING)
+          → Compounds (ChEMBL)
+            → Clinical Trials (ClinicalTrials.gov)
+```
+
+**Pattern 2: Structure-Function Analysis**
+```
+Gene Symbol
+  → Gene (HGNC)
+    → Protein (UniProt)
+      → Structures (PDB via cross_references)
+        → Function Analysis
+          → Pathway Membership (WikiPathways)
+```
+
+**Pattern 3: Pharmacology Research**
+```
+Compound (ChEMBL)
+  → Target Proteins
+    → Genes (via cross_references)
+      → Disease Associations (Open Targets)
+        → Clinical Evidence (ClinicalTrials)
+```
+
+---
+
+## Key Features and Capabilities
+
+### Database Coverage
+
+**13 Integrated Databases:**
+
+1. **HGNC** - HUGO Gene Nomenclature Committee
+   - Authoritative gene symbols and names
+   - Cross-references to 22 external databases
+   - ~42,000 approved human genes
+
+2. **UniProt** - Universal Protein Resource
+   - Protein sequences and annotations
+   - Functional descriptions
+   - ~560,000 reviewed proteins (Swiss-Prot)
+
+3. **ChEMBL** - Bioactivity Database
+   - Compound structures and bioactivity
+   - Drug development phases
+   - Therapeutic indications
+   - ~2.3M compounds
+
+4. **Open Targets** - Target-Disease Associations
+   - Evidence-based associations
+   - Genetic, literature, and clinical evidence
+   - ~60,000 targets × ~20,000 diseases
+
+5. **STRING** - Protein-Protein Interactions
+   - Known and predicted interactions
+   - Evidence scores (experimental, database, text mining)
+   - Network visualization
+
+6. **BioGRID** - Biological General Repository
+   - Genetic and protein interactions
+   - Manually curated data
+   - ~2.5M interactions
+
+7. **Ensembl** - Genome Databases
+   - Gene and transcript annotations
+   - Cross-species genomic data
+   - Genome assemblies and variants
+
+8. **Entrez** - NCBI Gene Database
+   - Gene summaries and literature
+   - PubMed links
+   - Model organism data
+
+9. **PubChem** - Chemical Information
+   - Compound and substance records
+   - Molecular structures
+   - Bioassay data
+   - ~110M compounds
+
+10. **IUPHAR/GtoPdb** - Pharmacology
+    - Receptor and ion channel data
+    - Ligand-target interactions
+    - Quantitative pharmacology
+
+11. **WikiPathways** - Biological Pathways
+    - Curated pathway models
+    - Gene-pathway associations
+    - Pathway components
+
+12. **ClinicalTrials.gov** - Clinical Trials
+    - Trial protocols and status
+    - Eligibility criteria
+    - Outcome measures
+    - ~450,000 trials
+
+13. **DrugBank** - Drug Data (Requires API Key)
+    - Comprehensive drug information
+    - Drug-target interactions
+    - Pharmacokinetics
+
+### API Capabilities
+
+**Search Operations:**
+- Fuzzy matching with ranking
+- Pagination with cursors
+- Organism filtering (Ensembl, BioGRID)
+- Field-specific search (UniProt, ChEMBL)
+
+**Lookup Operations:**
+- CURIE-based retrieval
+- Slim mode for token efficiency
+- Batch operations (ChEMBL: up to 100)
+- Cross-reference expansion
+
+**Specialized Operations:**
+- Target-disease associations (Open Targets)
+- Protein-protein interactions (STRING)
+- Network visualization URLs (STRING)
+- Pathway components (WikiPathways)
+- Trial locations (ClinicalTrials)
+- PubMed literature links (Entrez)
+
+**Data Formats:**
+- JSON (primary)
+- GraphQL (Open Targets)
+- XML (Entrez with defusedxml)
+
+### Performance Optimizations
+
+**Rate Limiting:**
+- Lock-based throttling (10 req/s typical)
+- Exponential backoff on 429/503 errors
+- Thundering herd prevention
+- Configurable retry limits
+
+**Batch Operations:**
+- Single API call for 100 compounds
+- Reduces latency by 10-100x
+- Token efficiency with slim mode
+- Individual failure handling
+
+**Slim Mode:**
+- Reduces tokens from ~300 to ~20
+- Optional per request
+- Default for batch operations
+- Excludes cross_references, synonyms, detailed fields
+
+**Connection Pooling:**
+- Shared httpx.AsyncClient per client
+- Max 10 concurrent connections (configurable)
+- Keep-alive connection reuse
+- Lazy initialization
+
+**Cursor-Based Pagination:**
+- Opaque cursors (no offset math)
+- Server-side pagination (UniProt)
+- Client-side slicing (HGNC, ChEMBL)
+- Configurable page sizes (1-500)
+
+### Reliability Features
+
+**Error Handling:**
+- 5 canonical error codes
+- Actionable recovery hints
+- Error type detection (4xx vs 5xx)
+- Invalid input tracking
+
+**Validation:**
+- CURIE format validation (regex patterns)
+- Query length checks (min 2 chars)
+- Batch size limits (max 100)
+- Field constraints (Pydantic)
+
+**Retry Logic:**
+- Exponential backoff (1s, 2s, 4s)
+- Retry-After header respect
+- Maximum 3 attempts
+- Per-client configuration
+
+**Cleanup:**
+- Async context manager support
+- Automatic connection closing
+- Thread pool shutdown (ChEMBL)
+- Module-level singleton lifecycle
+
+---
+
+## Technical Highlights
+
+### Technology Stack
+
+**Core Dependencies:**
+- **Python 3.10+** - Async/await, type hints
+- **Pydantic 2.x** - Data validation and serialization
+- **httpx** - Async HTTP client with connection pooling
+- **FastMCP** - MCP server framework
+- **asyncio** - Async runtime and concurrency primitives
+
+**API SDKs:**
+- **chembl_webresource_client** - ChEMBL SDK (wrapped with ThreadPoolExecutor)
+
+**Security:**
+- **defusedxml** - Secure XML parsing (Entrez)
+
+**Development/Testing:**
+- **pytest** - Testing framework
+- **pytest-asyncio** - Async test support
+- **python-dotenv** - Environment variable loading
+
+### Design Patterns
+
+**Singleton Pattern:**
+- Module-level client instances
+- Lazy initialization on first request
+- Shared across all tool invocations
+- No cleanup hooks needed (FastMCP managed)
+
+**Repository Pattern:**
+- Each client acts as repository for a database
+- Standardized search/get operations
+- Consistent error handling
+- Transaction-like semantics (async context managers)
+
+**Factory Pattern:**
+- `PaginationEnvelope.create()` factory method
+- `ErrorEnvelope.*()` class methods for each error code
+- Consistent envelope construction
+
+**Strategy Pattern:**
+- Rate limiting strategies vary by client (1-15 req/s)
+- Pagination strategies (server-side vs client-side)
+- Error mapping strategies per API
+
+**Builder Pattern:**
+- `_build_cross_references()` methods in each client
+- Complex object construction from API responses
+- Field mapping and normalization
+
+**Adapter Pattern:**
+- ChEMBLClient adapts synchronous SDK to async interface
+- ThreadPoolExecutor wrapper for SDK calls
+- Consistent API despite underlying differences
+
+**Gateway Pattern:**
+- Gateway server composes multiple services
+- Direct mounting (as_proxy=False)
+- Unified interface, no proxy overhead
+
+### Code Quality
+
+**Lines of Code:**
+- Clients: ~8,162 lines
+- Models: ~3,403 lines
+- Servers: ~1,800 lines
+- Total source: ~13,365 lines
+
+**Type Safety:**
+- 100% type hints in public APIs
+- Pydantic runtime validation
+- MyPy-compatible type annotations
+- Generic types (PaginationEnvelope[T])
+
+**Validation:**
+- CURIE format validation (regex patterns)
+- Field constraints (min/max, patterns)
+- Model validators (omit-if-null)
+- Enum-based error codes
+
+**Test Coverage:**
+- 500+ integration tests
+- 100+ unit tests
+- End-to-end workflow tests
+- Error recovery test suite
+
+**Documentation:**
+- Comprehensive docstrings
+- Type hints for IDE support
+- Architectural Decision Records (ADRs)
+- This architecture documentation set
+
+---
+
+## Documentation Index
+
+### Component Documentation
+
+**[Component Inventory](docs/01_component_inventory.md)** (912 lines)
+
+Comprehensive catalog of all modules, classes, and functions:
+
+- **Public API Surface:**
+  - 13 client classes with method signatures
+  - 18 data model files with field definitions
+  - 14 server implementations with tool lists
+  - Entry points and deployment configurations
+
+- **Internal Implementation:**
+  - Rate limiting patterns
+  - Cross-reference mapping functions
+  - Error handling utilities
+  - Pagination cursor encoding
+  - XML parsing (Entrez)
+
+- **Module Dependencies:**
+  - Dependency graph visualization
+  - External dependencies (httpx, pydantic, fastmcp)
+  - Cross-module patterns
+
+- **Architecture Patterns:**
+  - Async-first design
+  - Repository pattern
+  - Gateway pattern
+  - Factory pattern
+  - Strategy pattern
+
+**Key Sections:**
+- Lines 20-553: Public Client Classes
+- Lines 307-525: Public Data Models
+- Lines 547-567: Public Aggregator
+- Lines 570-683: Internal Implementation
+- Lines 703-872: Entry Points
+
+### Architecture Documentation
+
+**[Architecture Diagrams](diagrams/02_architecture_diagrams.md)** (1,091 lines)
+
+Visual representations of system structure:
+
+- **System Architecture** (Lines 1-178):
+  - 4-layer architecture diagram
+  - Client/model/server/gateway relationships
+  - Inheritance hierarchies
+  - External API connections
+
+- **Component Relationships** (Lines 207-294):
+  - Fuzzy-to-Fact protocol flow
+  - Client architecture patterns
+  - Error handling flow
+  - Data validation flow
+  - Provenance tracking
+
+- **Class Hierarchies** (Lines 296-612):
+  - Data model class diagram (Gene, Protein, Compound, etc.)
+  - Client class diagram (LifeSciencesClient + 13 specialized)
+  - Envelope pattern (PaginationEnvelope, ErrorEnvelope)
+
+- **Module Dependencies** (Lines 614-816):
+  - Package dependency graph
+  - External dependencies
+  - Dependency flow (External APIs → Clients → Models ← Servers → Gateway)
+
+- **Data Flow Diagram** (Lines 818-936):
+  - Phase 1: Fuzzy search sequence
+  - Phase 2: Fact retrieval sequence
+  - Error handling sequence
+  - Cross-database navigation
+
+- **Additional Diagrams** (Lines 939-1057):
+  - Cross-reference mapping (22-key registry)
+  - Server-to-client 1:1 mapping
+
+**Key Diagrams:**
+- System Architecture (mermaid graph TB)
+- Component Relationships (mermaid graph LR)
+- Class Hierarchies (mermaid classDiagram)
+- Data Flow (mermaid sequenceDiagram)
+
+### Data Flow Documentation
+
+**[Data Flow Analysis](docs/03_data_flows.md)** (1,740 lines)
+
+Detailed sequence diagrams showing request/response patterns:
+
+- **Fuzzy-to-Fact Protocol** (Lines 20-122):
+  - Phase 1: Fuzzy search with alias boosting
+  - Phase 2: Strict CURIE-based lookup
+  - Score calculation (1.0 for exact, 0.95-0.1 for position)
+  - CURIE validation and error handling
+
+- **Rate-Limited API Client** (Lines 124-265):
+  - Lock acquisition and timing checks
+  - Thundering herd prevention
+  - Exponential backoff on 429/503
+  - SDK wrapping pattern (ChEMBL)
+  - Request 1 vs Request 2 concurrency
+
+- **Error Recovery Flow** (Lines 267-460):
+  - UNRESOLVED_ENTITY scenario (raw string → search → get)
+  - AMBIGUOUS_QUERY scenario (query too short → refine)
+  - RATE_LIMITED scenario (429 → backoff → retry)
+  - Agent self-correction workflow
+
+- **Gateway Composition** (Lines 462-646):
+  - Server import and mounting
+  - Direct composition (as_proxy=False)
+  - Tool naming convention (prefix with database)
+  - Lifecycle: cold start → lazy init → reuse
+
+- **Batch Operations** (Lines 648-841):
+  - 10 compounds in 1 API call vs 10 calls
+  - CURIE validation and mapping
+  - Result ordering preservation
+  - Slim mode for token efficiency
+
+- **Cross-Database Navigation** (Lines 843-1075):
+  - Gene → Protein → Compound → Target workflow
+  - 22-key registry usage
+  - Cross-reference building examples
+  - Navigation patterns (5 examples)
+
+- **Aggregated Search** (Lines 1077-1298):
+  - UnifiedSearch multi-database query
+  - Re-ranking with heuristics
+  - Alias boosting ("p53" → TP53)
+  - Experimental aggregator patterns
+
+- **Session Lifecycle** (Lines 1300-1607):
+  - Module-level singleton pattern
+  - Lazy HTTP client initialization
+  - Connection pool benefits
+  - Shutdown handling (FastMCP internal)
+
+**Key Flows:**
+- Lines 20-122: Fuzzy-to-Fact complete flow
+- Lines 124-212: Rate limiting with concurrency
+- Lines 267-378: Error recovery (3 scenarios)
+- Lines 462-544: Gateway request routing
+- Lines 650-739: Batch vs individual comparison
+
+### API Documentation
+
+**[API Reference](docs/04_api_reference.md)** (2,186 lines)
+
+Complete API documentation with usage examples:
+
+- **Client APIs** (Lines 22-835):
+  - LifeSciencesClient base class
+  - HGNCClient (search_genes, get_gene)
+  - UniProtClient (search_proteins, get_protein)
+  - EnsemblClient (search_genes, get_gene, get_transcript)
+  - ChEMBLClient (search_compounds, get_compound, get_compounds_batch)
+  - OpenTargetsClient (search_targets, get_target, get_associations)
+  - 7 more specialized clients
+
+- **Data Models** (Lines 837-1267):
+  - Gene, SearchCandidate, CrossReferences
+  - Protein, ProteinSearchCandidate
+  - Compound, CompoundSearchCandidate
+  - Target, Association
+  - EnsemblGene, EnsemblTranscript
+  - PaginationEnvelope, ErrorEnvelope
+  - Field definitions, validation rules, examples
+
+- **Server APIs** (Lines 1440-1640):
+  - Gateway server (34+ tools)
+  - HGNC server (search_genes, get_gene)
+  - Individual server patterns
+  - Configuration and deployment
+
+- **Orchestration APIs** (Lines 1642-1718):
+  - UnifiedSearch aggregator
+  - Multi-database search with re-ranking
+
+- **Utility Functions** (Lines 1720-1806):
+  - Cross-reference mapping utilities
+  - Error handling patterns
+  - Rate limiting strategies
+
+- **Configuration Reference** (Lines 1808-1884):
+  - Environment variables
+  - Rate limiting configuration
+  - Pagination configuration
+
+- **Usage Patterns** (Lines 1886-2076):
+  - Pattern 1: Fuzzy-to-Fact search
+  - Pattern 2: Cross-database navigation
+  - Pattern 3: Batch operations
+  - Pattern 4: Error recovery
+
+- **Appendix** (Lines 2078-2186):
+  - Type definitions
+  - Error codes table
+  - CURIE formats table
+  - Source file reference
+
+**Key Sections:**
+- Lines 113-226: HGNCClient complete reference
+- Lines 1270-1437: Envelope models (PaginationEnvelope, ErrorEnvelope)
+- Lines 1444-1571: Gateway server (all 34+ tools)
+- Lines 1890-2076: Usage patterns with examples
+
+---
+
+## Getting Started with the Codebase
+
+### Understanding the Architecture
+
+**Step-by-step guide for new developers:**
+
+**Step 1: High-Level Overview**
+1. Read this README's [Architecture at a Glance](#architecture-at-a-glance) section
+2. Review [Architecture Diagrams](diagrams/02_architecture_diagrams.md#system-architecture) for visual structure
+3. Understand the 4 layers: Models → Clients → Servers → Gateway
+
+**Step 2: Core Concepts**
+1. Study [Fuzzy-to-Fact Protocol](#1-fuzzy-to-fact-protocol) in this README
+2. Read [Data Flow Analysis](docs/03_data_flows.md#1-fuzzy-to-fact-protocol-flow) for detailed sequence
+3. Practice with example: search_genes → get_gene
+
+**Step 3: API Exploration**
+1. Review [API Reference](docs/04_api_reference.md) for client documentation
+2. Study [Component Inventory](docs/01_component_inventory.md#public-api) for complete API surface
+3. Examine [Data Models](docs/04_api_reference.md#data-models) for entity structures
+
+**Step 4: Implementation Details**
+1. Read [Rate Limiting Strategy](#2-rate-limiting-strategies) in this README
+2. Review [Error Recovery Patterns](#3-error-recovery-patterns)
+3. Examine [Cross-Reference System](#4-cross-reference-system)
+
+**Step 5: Hands-On Practice**
+1. Clone repository and install dependencies
+2. Run individual server: `uv run fastmcp run src/lifesciences_mcp/servers/hgnc.py`
+3. Test Fuzzy-to-Fact workflow with HGNC client
+4. Explore cross-database navigation
+
+### Common Use Cases
+
+**Use Case 1: Gene Resolution**
+```python
+from lifesciences_mcp.clients import HGNCClient
+
+async with HGNCClient() as client:
+    # Fuzzy search
+    results = await client.search_genes("BRCA1")
+
+    # Get full record
+    gene = await client.get_gene(results.items[0].id)
+    print(f"{gene.symbol}: {gene.name}")
+    print(f"Location: {gene.location}")
+```
+
+**Documentation:**
+- [HGNCClient API Reference](docs/04_api_reference.md#hgncclient)
+- [Fuzzy-to-Fact Flow](docs/03_data_flows.md#1-fuzzy-to-fact-protocol-flow)
+- [Gene Model](docs/04_api_reference.md#gene)
+
+**Use Case 2: Cross-Database Navigation**
+```python
+from lifesciences_mcp.clients import HGNCClient, UniProtClient
+
+async with HGNCClient() as hgnc, UniProtClient() as uniprot:
+    # Get gene
+    gene = await hgnc.get_gene("HGNC:11998")
+
+    # Navigate to protein
+    uniprot_id = f"UniProtKB:{gene.cross_references.uniprot[0]}"
+    protein = await uniprot.get_protein(uniprot_id)
+    print(f"Function: {protein.function}")
+```
+
+**Documentation:**
+- [Cross-Database Navigation](docs/03_data_flows.md#6-cross-database-navigation-flow)
+- [CrossReferences Model](docs/04_api_reference.md#crossreferences)
+- [Pattern 2: Cross-Database Navigation](docs/04_api_reference.md#pattern-2-cross-database-navigation)
+
+**Use Case 3: Batch Compound Lookup**
+```python
+from lifesciences_mcp.clients import ChEMBLClient
+
+client = ChEMBLClient()
+try:
+    # Search to get CURIEs
+    results = await client.search_compounds("kinase inhibitor")
+    ids = [c.id for c in results.items[:10]]
+
+    # Batch lookup
+    compounds = await client.get_compounds_batch(ids, slim=True)
+    for compound in compounds:
+        print(f"{compound['name']}: Phase {compound.get('max_phase')}")
+finally:
+    await client.close()
+```
+
+**Documentation:**
+- [Batch Operations Flow](docs/03_data_flows.md#5-batch-operations-flow)
+- [ChEMBLClient.get_compounds_batch()](docs/04_api_reference.md#get_compounds_batch)
+- [Pattern 3: Batch Operations](docs/04_api_reference.md#pattern-3-batch-operations)
+
+**Use Case 4: Error Recovery**
+```python
+from lifesciences_mcp.clients import HGNCClient
+from lifesciences_mcp.models import ErrorEnvelope, ErrorCode
+
+async with HGNCClient() as client:
+    result = await client.get_gene("brca1")  # Invalid format
+
+    if isinstance(result, ErrorEnvelope):
+        if result.error.code == ErrorCode.UNRESOLVED_ENTITY:
+            # Recover by calling search
+            search_result = await client.search_genes("brca1")
+            gene = await client.get_gene(search_result.items[0].id)
+```
+
+**Documentation:**
+- [Error Recovery Flow](docs/03_data_flows.md#3-error-recovery-flow)
+- [ErrorEnvelope API](docs/04_api_reference.md#errorenvelope)
+- [Pattern 4: Error Recovery](docs/04_api_reference.md#pattern-4-error-recovery)
+
+### Contributing
+
+**How to use these docs when contributing:**
+
+**Adding a New Client:**
+1. Review [LifeSciencesClient](docs/04_api_reference.md#lifesciencesclient-base-class) base class
+2. Study existing client (e.g., [HGNCClient](docs/01_component_inventory.md#hgncclient---gene-nomenclature))
+3. Implement:
+   - `search_*()` method (Phase 1)
+   - `get_*()` method (Phase 2)
+   - `_build_cross_references()` mapping
+   - Rate limiting (10 req/s default)
+4. Add tests following [test patterns](docs/04_api_reference.md#error-handling)
+
+**Adding a New Data Model:**
+1. Review [Data Model Layer](docs/01_component_inventory.md#public-data-models)
+2. Inherit from Pydantic BaseModel
+3. Add CURIE validation pattern
+4. Implement omit-if-null pattern
+5. Add to `models/__init__.py` exports
+6. Document in [API Reference](docs/04_api_reference.md#data-models)
+
+**Adding a New Server:**
+1. Review [Server Pattern](docs/01_component_inventory.md#mcp-server-entry-points)
+2. Create FastMCP instance
+3. Implement module-level singleton
+4. Add @mcp.tool decorators
+5. Mount in [Gateway](docs/04_api_reference.md#gateway-server)
+6. Test individually before gateway integration
+
+**Updating Documentation:**
+1. Update [Component Inventory](docs/01_component_inventory.md) for new components
+2. Add diagrams to [Architecture Diagrams](diagrams/02_architecture_diagrams.md) if needed
+3. Document data flows in [Data Flow Analysis](docs/03_data_flows.md)
+4. Add API docs to [API Reference](docs/04_api_reference.md)
+5. Update this README if architectural patterns change
+
+---
+
+## Architecture Metrics
+
+### Component Counts
+
+- **Databases:** 13 integrated (12 operational + 1 requires API key)
+- **API Clients:** 13 specialized clients
+- **Data Models:** 18 Pydantic model files
+- **MCP Servers:** 14 implementations (13 individual + 1 gateway)
+- **MCP Tools:** 34+ tools across all databases
+- **Cross-Reference Keys:** 22-key standardized registry
+
+### Code Volume
+
+- **Client Layer:** ~8,162 lines of code
+- **Model Layer:** ~3,403 lines of code
+- **Server Layer:** ~1,800 lines of code
+- **Total Source Code:** ~13,365 lines (excluding tests)
+- **Test Code:** 600+ test cases
+
+### Database Coverage
+
+**Biological Entities:**
+- Genes: ~42,000 (HGNC) + millions (Ensembl, Entrez)
+- Proteins: ~560,000 reviewed (UniProt)
+- Compounds: ~2.3M (ChEMBL) + ~110M (PubChem)
+- Trials: ~450,000 (ClinicalTrials.gov)
+- Interactions: ~2.5M (BioGRID) + billions (STRING)
+- Pathways: ~3,000 (WikiPathways)
+- Targets: ~60,000 (Open Targets)
+
+**Cross-References:**
+- 22-key registry per entity
+- Average 3-8 cross-references per gene
+- Average 5-12 cross-references per protein
+- Enables navigation across all 13 databases
+
+### Performance Characteristics
+
+**Rate Limits:**
+- 10 requests/second: HGNC, UniProt, ChEMBL, Open Targets
+- 15 requests/second: Ensembl
+- 1 request/second: STRING, ClinicalTrials
+
+**Response Times (typical):**
+- Search operations: 100-500ms
+- Get operations: 50-200ms
+- Batch operations: 500-1500ms (100 entities)
+
+**Token Budgets:**
+- Full mode: 115-300 tokens per entity
+- Slim mode: ~20 tokens per entity
+- SearchCandidate: ~20 tokens
+- ErrorEnvelope: ~40 tokens
+
+**Batch Efficiency:**
+- Single compound: ~1s (10 rate limit)
+- 10 compounds (individual): ~10s
+- 10 compounds (batch): ~1s (10x faster)
+- 100 compounds (batch): ~2s (50x faster)
+
+---
+
+## Next Steps
+
+### For New Developers
+
+**Recommended Reading Order:**
+
+1. **Week 1: Foundations**
+   - Day 1-2: This README (overview and key concepts)
+   - Day 3-4: [Architecture Diagrams](diagrams/02_architecture_diagrams.md) (visual understanding)
+   - Day 5: Hands-on: Run HGNC server and test Fuzzy-to-Fact
+
+2. **Week 2: Deep Dive**
+   - Day 1-2: [Component Inventory](docs/01_component_inventory.md) (public APIs)
+   - Day 3-4: [API Reference](docs/04_api_reference.md) (clients and models)
+   - Day 5: Hands-on: Implement cross-database navigation
+
+3. **Week 3: Advanced Topics**
+   - Day 1-2: [Data Flow Analysis](docs/03_data_flows.md) (all 8 flows)
+   - Day 3-4: Study rate limiting and error recovery implementations
+   - Day 5: Hands-on: Build batch operation workflow
+
+4. **Week 4: Mastery**
+   - Day 1-2: Review all ADRs (Architectural Decision Records)
+   - Day 3-4: Study test suite patterns
+   - Day 5: Contribute first feature or fix
+
+### For System Integration
+
+**Key Documentation for Integration:**
+
+1. **Gateway Deployment:**
+   - [Gateway Server](docs/04_api_reference.md#gateway-server)
+   - [Gateway Composition Flow](docs/03_data_flows.md#4-gateway-server-composition-flow)
+   - Entry point: `src/lifesciences_mcp/servers/gateway.py:mcp`
+
+2. **MCP Protocol:**
+   - [Server Layer Overview](docs/01_component_inventory.md#primary-entry-points)
+   - [Tool Naming Conventions](docs/04_api_reference.md#available-tools)
+   - FastMCP documentation: https://github.com/jlowin/fastmcp
+
+3. **Error Handling:**
+   - [ErrorEnvelope API](docs/04_api_reference.md#errorenvelope)
+   - [Error Recovery Flow](docs/03_data_flows.md#3-error-recovery-flow)
+   - [Error Codes Reference](docs/04_api_reference.md#error-codes)
+
+4. **Data Models:**
+   - [All Models](docs/04_api_reference.md#data-models)
+   - [CrossReferences](docs/04_api_reference.md#crossreferences)
+   - [PaginationEnvelope](docs/04_api_reference.md#paginationenvelope)
+
+### For Performance Optimization
+
+**Relevant Performance Documentation:**
+
+1. **Rate Limiting:**
+   - [Rate Limiting Strategy](#2-rate-limiting-strategies)
+   - [Rate-Limited Client Flow](docs/03_data_flows.md#2-rate-limited-api-client-flow)
+   - [Configuration Reference](docs/04_api_reference.md#rate-limiting-configuration)
+
+2. **Batch Operations:**
+   - [Batch Operations Flow](docs/03_data_flows.md#5-batch-operations-flow)
+   - [ChEMBLClient.get_compounds_batch()](docs/04_api_reference.md#get_compounds_batch)
+   - [Pattern 3: Batch Operations](docs/04_api_reference.md#pattern-3-batch-operations)
+
+3. **Token Efficiency:**
+   - [Slim Mode](#5-slim-mode-for-token-efficiency)
+   - [Slim Mode Usage](docs/04_api_reference.md#pattern-1-fuzzy-to-fact-search)
+
+4. **Connection Pooling:**
+   - [Session Lifecycle](docs/03_data_flows.md#8-session-lifecycle-and-connection-management)
+   - [LifeSciencesClient](docs/04_api_reference.md#lifesciencesclient-base-class)
+
+---
+
+## Additional Resources
+
+### Source Code Files
+
+**Entry Points:**
+- Gateway: `src/lifesciences_mcp/servers/gateway.py`
+- Individual servers: `src/lifesciences_mcp/servers/*.py`
+
+**Client Implementations:**
+- Base: `src/lifesciences_mcp/clients/base.py`
+- HGNC: `src/lifesciences_mcp/clients/hgnc.py`
+- UniProt: `src/lifesciences_mcp/clients/uniprot.py`
+- ChEMBL: `src/lifesciences_mcp/clients/chembl.py`
+- [See full list](docs/04_api_reference.md#source-file-reference)
+
+**Data Models:**
+- Gene: `src/lifesciences_mcp/models/gene.py`
+- Protein: `src/lifesciences_mcp/models/protein.py`
+- Envelopes: `src/lifesciences_mcp/models/envelopes.py`
+- [See full list](docs/04_api_reference.md#model-files)
+
+**Orchestration:**
+- Aggregator: `src/lifesciences_agent/aggregator.py`
+
+**Tests:**
+- Integration: `tests/integration/`
+- Unit: `tests/unit/`
+- E2E: `tests/e2e/`
+
+### External Documentation
+
+**Database APIs:**
+- HGNC: https://www.genenames.org/help/rest/
+- UniProt: https://www.uniprot.org/help/api
+- ChEMBL: https://chembl.gitbook.io/chembl-interface-documentation/web-services
+- Ensembl: https://rest.ensembl.org/
+- Open Targets: https://platform-docs.opentargets.org/data-access/graphql-api
+
+**Frameworks:**
+- FastMCP: https://github.com/jlowin/fastmcp
+- Pydantic: https://docs.pydantic.dev/
+- httpx: https://www.python-httpx.org/
+
+**Standards:**
+- CURIE Format: https://www.w3.org/TR/curie/
+- Model Context Protocol: https://modelcontextprotocol.io/
+
+---
+
+## Summary
+
+The **Life Sciences MCP** is a production-ready biological data integration platform that provides:
+
+- **Unified Access:** 13 databases through a single gateway with 34+ MCP tools
+- **Agent-Friendly:** Fuzzy-to-Fact protocol prevents hallucination
+- **Type-Safe:** Pydantic models with comprehensive validation
+- **Robust:** Error recovery with actionable hints for autonomous agents
+- **Performant:** Rate limiting, batch operations, connection pooling, slim mode
+- **Navigable:** 22-key cross-reference registry for seamless database traversal
+
+**Architecture Highlights:**
+- 4-layer design (Models → Clients → Servers → Gateway)
+- ~13,365 lines of production code
+- 600+ test cases with comprehensive coverage
+- Async-first with connection pooling and rate limiting
+- Gateway composition without proxy overhead
+
+**Use This Documentation:**
+- **Start here** for architecture overview
+- **[Component Inventory](docs/01_component_inventory.md)** for detailed API surface
+- **[Architecture Diagrams](diagrams/02_architecture_diagrams.md)** for visual understanding
+- **[Data Flow Analysis](docs/03_data_flows.md)** for workflow patterns
+- **[API Reference](docs/04_api_reference.md)** for complete API documentation
+
+**Get Started:**
+```bash
+# Run gateway server
+uv run fastmcp run src/lifesciences_mcp/servers/gateway.py
+
+# Or individual server
+uv run fastmcp run src/lifesciences_mcp/servers/hgnc.py
+```
+
+**Questions or Issues:**
+- Review the appropriate documentation section
+- Check [API Reference](docs/04_api_reference.md#usage-patterns-and-best-practices) for usage patterns
+- Examine test suite for examples
+
+---
+
+**Document Version:** 1.0
+**Last Updated:** 2026-01-07
+**Repository:** lifesciences-research
+**Commit:** 4308911 (initial commit)

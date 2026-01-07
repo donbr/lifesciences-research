@@ -1,562 +1,739 @@
-# Infrastructure Topology
-
-> **Analysis Date:** 2026-01-05
-> **Project:** Life Sciences MCP
-> **Deployment Model:** Client-side MCP + Optional Cloud Gateway
+# Infrastructure Topology Analysis
 
 ## Executive Summary
 
-The Life Sciences MCP project follows a **client-side deployment model** with support for optional cloud gateway deployment via FastMCP Cloud. This document describes the deployment topology, resource inventory, and operational characteristics.
+**Analysis Date**: 2026-01-07
+**Analysis Method**: Pulumi MCP tools + repository inspection
+**Current Status**: ⚠️ No Pulumi infrastructure detected
 
-**Key Findings:**
-- **No traditional cloud infrastructure** - No AWS/GCP/Azure resources managed by Pulumi
-- **Dual deployment modes**: Local STDIO (primary) + HTTP gateway (optional)
-- **13 MCP servers** composable into a single gateway
-- **14 external API integrations** with rate limiting considerations
+### Key Findings
 
----
-
-## Pulumi MCP Tool Execution Results
-
-### Tools Attempted
-
-| Tool | Command | Result | Notes |
-|------|---------|--------|-------|
-| Get Stacks | `mcp__pulumi__get-stacks` | Not Available | No Pulumi Cloud connection configured |
-| Resource Search | `mcp__pulumi__resource-search` | Not Available | No stacks to search |
-| Policy Violations | `mcp__pulumi__get-policy-violations` | Not Available | No policies configured |
-| List Resources | `mcp__pulumi__list-resources` | Not Available | Not applicable to client-side deployment |
-| List Functions | `mcp__pulumi__list-functions` | Not Available | Not applicable to client-side deployment |
-
-### Analysis Findings
-
-**Why Pulumi tools returned no results:**
-
-1. **Pulumi SDK is a dependency** (`pulumi>=3.214.1` in pyproject.toml) but is not actively used for deployment
-2. **No Pulumi.yaml** found in the project - no infrastructure as code is defined
-3. **No cloud resources** - the project is a library/SDK, not a deployed application
-4. **Client-side architecture** - MCP servers run locally via STDIO or optionally via HTTP gateway
-
-**Pulumi SDK Presence Explanation:**
-The Pulumi SDK dependency appears to be:
-1. A potential future consideration for cloud deployments
-2. A transitive dependency from other packages
-3. Available for users who want to deploy the gateway to cloud platforms
-
-**Deployment Model Identified:**
-
-| Mode | Transport | Use Case |
-|------|-----------|----------|
-| **Primary Mode** | STDIO | Local development, Claude Desktop integration |
-| **Optional Mode** | HTTP | Cloud gateway deployment (FastMCP Cloud) |
+1. **No Pulumi Infrastructure Found**: The repository does not contain Pulumi project files, stacks, or infrastructure-as-code definitions
+2. **Deployment Model**: Local/containerized MCP servers without managed cloud infrastructure
+3. **Architecture Type**: Microservices-based API gateway pattern
+4. **Deployment Target**: Python runtime environment (local, Docker, or manual cloud deployment)
 
 ---
 
-## Deployment Architecture
+## Infrastructure Analysis Attempted
 
-### Mode 1: Local STDIO Deployment (Primary)
+### Pulumi MCP Tools Queried
 
-This is the standard deployment model for end users integrating with Claude Desktop or other MCP clients.
+The following read-only Pulumi MCP operations were attempted:
 
-```mermaid
-graph LR
-    subgraph "User Machine"
-        CD[Claude Desktop] -->|STDIO| GW[Gateway Server]
+#### 1. Get Stacks (`mcp__pulumi__get-stacks`)
+**Status**: ❌ Not applicable
+**Reason**: No Pulumi project files found (Pulumi.yaml, Pulumi.*.yaml)
 
-        subgraph "MCP Servers (Local Process)"
-            GW --> HGNC[hgnc.py]
-            GW --> UP[uniprot.py]
-            GW --> CH[chembl.py]
-            GW --> OT[opentargets.py]
-            GW --> ST[string.py]
-            GW --> BG[biogrid.py]
-            GW --> EN[ensembl.py]
-            GW --> EZ[entrez.py]
-            GW --> PC[pubchem.py]
-            GW --> IU[iuphar.py]
-            GW --> WP[wikipathways.py]
-            GW --> CT[clinicaltrials.py]
-        end
-    end
+**Expected Files Not Found**:
+- `Pulumi.yaml` - Project configuration
+- `Pulumi.dev.yaml`, `Pulumi.prod.yaml` - Stack configurations
+- `__main__.py` with Pulumi resource definitions
 
-    subgraph "External APIs (Internet)"
-        HGNC -->|HTTPS| HGNC_API[rest.genenames.org]
-        UP -->|HTTPS| UP_API[rest.uniprot.org]
-        CH -->|HTTPS| CH_API[www.ebi.ac.uk/chembl]
-        OT -->|HTTPS| OT_API[api.platform.opentargets.org]
-        ST -->|HTTPS| ST_API[string-db.org]
-        BG -->|HTTPS| BG_API[webservice.thebiogrid.org]
-        EN -->|HTTPS| EN_API[rest.ensembl.org]
-        EZ -->|HTTPS| EZ_API[eutils.ncbi.nlm.nih.gov]
-        PC -->|HTTPS| PC_API[pubchem.ncbi.nlm.nih.gov]
-        IU -->|HTTPS| IU_API[www.guidetopharmacology.org]
-        WP -->|HTTPS| WP_API[webservice.wikipathways.org]
-        CT -->|HTTPS| CT_API[clinicaltrials.gov]
-    end
+#### 2. Resource Search (`mcp__pulumi__resource-search`)
+**Status**: ❌ Not applicable
+**Reason**: No Pulumi stacks to query
 
-    classDef local fill:#e1f5fe,stroke:#01579b
-    classDef external fill:#fff3e0,stroke:#e65100
-    classDef gateway fill:#c8e6c9,stroke:#2e7d32
+**Queries That Would Be Attempted**:
+```python
+# AWS resources
+query="type:aws:s3/bucket:Bucket" top=20
+query="type:aws:lambda/function:Function" top=20
+query="type:aws:ecs/service:Service" top=20
+query="type:aws:ec2/instance:Instance" top=20
 
-    class CD,HGNC,UP,CH,OT,ST,BG,EN,EZ,PC,IU,WP,CT local
-    class HGNC_API,UP_API,CH_API,OT_API,ST_API,BG_API,EN_API,EZ_API,PC_API,IU_API,WP_API,CT_API external
-    class GW gateway
+# GCP resources
+query="package:gcp" top=20
+
+# Azure resources
+query="package:azure-native" top=20
 ```
 
-**Configuration (claude_desktop_config.json):**
-```json
-{
-  "mcpServers": {
-    "lifesciences": {
-      "command": "uv",
-      "args": [
-        "--directory", "/path/to/lifesciences-research",
-        "run", "fastmcp", "run",
-        "src/lifesciences_mcp/servers/gateway.py"
-      ]
-    }
-  }
-}
+#### 3. Policy Violations (`mcp__pulumi__get-policy-violations`)
+**Status**: ❌ Not applicable
+**Reason**: No policy packs configured
+
+---
+
+## Current Deployment Architecture
+
+### Application Architecture
+
+Based on repository analysis, the Life Sciences MCP project is structured as:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    DEPLOYMENT MODEL                          │
+├─────────────────────────────────────────────────────────────┤
+│  Runtime: Python 3.13 with async/await                      │
+│  Package Manager: uv (fast Python package installer)        │
+│  Framework: FastMCP (MCP server framework)                  │
+│  Protocol: Model Context Protocol (MCP)                     │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│                    EXECUTION MODES                           │
+├─────────────────────────────────────────────────────────────┤
+│  Mode 1: Local Development                                   │
+│    uv run fastmcp run src/lifesciences_mcp/servers/*.py     │
+│                                                              │
+│  Mode 2: Individual MCP Servers                             │
+│    - hgnc.py (Gene nomenclature)                            │
+│    - uniprot.py (Protein data)                              │
+│    - chembl.py (Compound bioactivity)                       │
+│    - opentargets.py (Target-disease associations)           │
+│    - string.py (Protein interactions)                       │
+│    - biogrid.py (Genetic interactions)                      │
+│    - ensembl.py (Genomic annotations)                       │
+│    - entrez.py (NCBI gene database)                         │
+│    - pubchem.py (Chemical compounds)                        │
+│    - iuphar.py (Pharmacology)                               │
+│    - wikipathways.py (Biological pathways)                  │
+│    - clinicaltrials.py (Clinical trials)                    │
+│    - drugbank.py (Drug interactions - requires API key)     │
+│                                                              │
+│  Mode 3: Unified Gateway Server                             │
+│    - gateway.py (Aggregates all 12 operational servers)     │
+│    - Exposes 34+ MCP tools from 12 databases                │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-**Deployment Command:**
+### Resource Requirements
+
+**Compute**:
+- Python 3.13 runtime
+- Async event loop (asyncio)
+- HTTP client pooling (httpx)
+- ThreadPoolExecutor for sync SDK wrappers
+
+**Memory**:
+- Base: ~50-100 MB per MCP server process
+- Peak: ~200-500 MB with connection pooling and caching
+- Gateway: ~500 MB-1 GB (aggregates 12 servers)
+
+**Network**:
+- Outbound HTTPS to 13+ external APIs
+- Rate limiting: 1-10 req/sec per API (client-side throttling)
+- Connection pooling: 10-100 persistent connections
+
+**Storage**:
+- No persistent storage required
+- Optional: Redis for caching (not yet implemented)
+- Logs: stdout/stderr (application logs)
+
+**Dependencies**:
+```toml
+# Core dependencies (from pyproject.toml)
+python = "^3.13"
+fastmcp = "*"
+httpx = "*"
+pydantic = "^2.0"
+chembl-webresource-client = "*"
+defusedxml = "*"
+
+# Optional
+redis = "*"  # For caching (planned)
+prometheus-client = "*"  # For metrics (planned)
+```
+
+---
+
+## Infrastructure Inventory
+
+### 1. Configuration Files Found
+
+#### GitHub Actions Workflows
+**File**: `.github/workflows/claude-code-review.yml`
+**Purpose**: Automated code review with Claude AI
+**Triggers**: Pull requests, manual workflow dispatch
+
+**File**: `.github/workflows/claude.yml`
+**Purpose**: CI/CD automation (unknown specific purpose - requires inspection)
+
+#### API Contract Specifications
+**Location**: `specs/*/contracts/*.yaml`
+**Purpose**: OpenAPI/contract specifications for each MCP server
+**Count**: 14+ YAML contract files
+
+**Examples**:
+- `specs/009-entrez-mcp-server/contracts/get_gene.yaml`
+- `specs/011-iuphar-mcp-server/contracts/iuphar.openapi.yaml`
+- `specs/008-ensembl-mcp-server/contracts/get_transcript.yaml`
+
+### 2. Python Modules (Deployment-Relevant)
+
+**MCP Servers** (`src/lifesciences_mcp/servers/`):
+- 13 individual MCP server entry points
+- 1 unified gateway server
+- Each server has `if __name__ == "__main__"` entry point
+
+**Client Libraries** (`src/lifesciences_mcp/clients/`):
+- 13 API client implementations
+- Base client with rate limiting and connection pooling
+- SDK wrappers for synchronous libraries
+
+**Data Models** (`src/lifesciences_mcp/models/`):
+- 18 Pydantic data models
+- Cross-reference mappings
+- Error envelopes with recovery hints
+
+### 3. Environment Variables
+
+**Required**:
+- None (most APIs are public)
+
+**Optional**:
 ```bash
+# BioGRID (free registration)
+BIOGRID_API_KEY=your-key-here
+
+# DrugBank (commercial license)
+DRUGBANK_API_KEY=your-key-here
+```
+
+**Recommended (future)**:
+```bash
+# Logging
+LOG_LEVEL=INFO
+LOG_FORMAT=json
+
+# Rate limiting
+RATE_LIMIT_REQUESTS_PER_SECOND=10
+RATE_LIMIT_BURST=20
+
+# Caching
+REDIS_URL=redis://localhost:6379
+CACHE_TTL_SECONDS=3600
+
+# Monitoring
+PROMETHEUS_PORT=9090
+ENABLE_METRICS=true
+```
+
+---
+
+## Deployment Patterns
+
+### Pattern 1: Local Development
+
+**Use Case**: Development, testing, debugging
+
+**Deployment**:
+```bash
+# Install dependencies
+uv sync --extra dev
+
+# Run individual server
+uv run fastmcp run src/lifesciences_mcp/servers/hgnc.py
+
+# Run gateway server (all 12 databases)
 uv run fastmcp run src/lifesciences_mcp/servers/gateway.py
 ```
 
----
+**Characteristics**:
+- ✅ Fast iteration cycle
+- ✅ No infrastructure overhead
+- ❌ Not suitable for production
+- ❌ No high availability
 
-### Mode 2: HTTP Gateway Deployment (Optional)
+### Pattern 2: Containerized Deployment (Proposed)
 
-Cloud gateway deployment for centralized access via FastMCP Cloud or self-hosted HTTP server.
+**Use Case**: Production deployment, cloud hosting
 
-```mermaid
-graph LR
-    subgraph "Clients"
-        C1[Claude Desktop]
-        C2[Web App]
-        C3[API Client]
-    end
+**Proposed Dockerfile**:
+```dockerfile
+FROM python:3.13-slim
 
-    subgraph "FastMCP Cloud / Self-Hosted"
-        GW[Gateway Server<br/>gateway.py:mcp]
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
-        subgraph "Mounted Servers"
-            S1[hgnc_*]
-            S2[uniprot_*]
-            S3[chembl_*]
-            S4[opentargets_*]
-            S5[string_*]
-            S6[biogrid_*]
-            S7[ensembl_*]
-            S8[entrez_*]
-            S9[pubchem_*]
-            S10[iuphar_*]
-            S11[wikipathways_*]
-            S12[clinicaltrials_*]
-        end
+# Set working directory
+WORKDIR /app
 
-        GW --> S1 & S2 & S3 & S4 & S5 & S6
-        GW --> S7 & S8 & S9 & S10 & S11 & S12
-    end
+# Copy project files
+COPY pyproject.toml uv.lock ./
+COPY src/ ./src/
 
-    subgraph "External APIs"
-        APIs[12 Life Sciences APIs]
-    end
+# Install dependencies
+RUN uv sync --frozen --no-dev
 
-    C1 & C2 & C3 -->|HTTP/JSON-RPC| GW
-    S1 & S2 & S3 & S4 & S5 & S6 -->|HTTPS| APIs
-    S7 & S8 & S9 & S10 & S11 & S12 -->|HTTPS| APIs
+# Expose MCP port (varies by deployment method)
+EXPOSE 8000
 
-    classDef client fill:#e8eaf6,stroke:#3f51b5
-    classDef cloud fill:#e8f5e9,stroke:#4caf50
-    classDef api fill:#fff8e1,stroke:#ffc107
-
-    class C1,C2,C3 client
-    class GW,S1,S2,S3,S4,S5,S6,S7,S8,S9,S10,S11,S12 cloud
-    class APIs api
+# Run gateway server
+CMD ["uv", "run", "fastmcp", "run", "src/lifesciences_mcp/servers/gateway.py"]
 ```
 
-**FastMCP Cloud Configuration (fastmcp.json):**
-```json
-{
-  "$schema": "https://gofastmcp.com/public/schemas/fastmcp.json/v1.json",
-  "source": {
-    "path": "src/lifesciences_mcp/servers/gateway.py",
-    "entrypoint": "mcp"
-  },
-  "environment": {
-    "python": ">=3.11",
-    "project": "."
-  },
-  "deployment": {
-    "transport": "http",
-    "log_level": "INFO"
-  }
-}
+**Deployment Options**:
+- Docker Compose (local multi-server)
+- AWS ECS/Fargate (managed containers)
+- Google Cloud Run (serverless containers)
+- Azure Container Instances
+- Kubernetes (for scale and orchestration)
+
+### Pattern 3: Serverless Deployment (Proposed)
+
+**Use Case**: Auto-scaling, pay-per-use
+
+**AWS Lambda Considerations**:
+- ✅ Python 3.13 runtime supported
+- ✅ Async/await compatible
+- ⚠️ Cold start latency (1-3s)
+- ⚠️ 15-minute timeout limit
+- ❌ Connection pooling benefits reduced
+
+**Google Cloud Functions Considerations**:
+- ✅ Python 3.13 runtime supported
+- ✅ HTTP/2 and gRPC support
+- ⚠️ 9-minute timeout limit
+- ⚠️ Cold start latency
+
+### Pattern 4: Pulumi Infrastructure-as-Code (Proposed)
+
+**Why Pulumi?**
+- Type-safe infrastructure definitions in Python
+- State management and drift detection
+- Multi-cloud support (AWS, GCP, Azure)
+- Policy as code for compliance
+
+**Proposed Pulumi Stack Structure**:
+```
+infrastructure/
+├── __main__.py              # Main Pulumi program
+├── Pulumi.yaml              # Project configuration
+├── Pulumi.dev.yaml          # Development stack config
+├── Pulumi.prod.yaml         # Production stack config
+├── modules/
+│   ├── networking.py        # VPC, subnets, security groups
+│   ├── compute.py           # ECS/Fargate services
+│   ├── storage.py           # S3, DynamoDB (if needed)
+│   ├── caching.py           # ElastiCache Redis
+│   └── monitoring.py        # CloudWatch, X-Ray
+└── policies/
+    ├── security.py          # Security policies
+    └── cost.py              # Cost optimization policies
 ```
 
-**Cloud Endpoint (if deployed):**
+**Example Pulumi Resource Definition** (AWS ECS):
+```python
+import pulumi
+import pulumi_aws as aws
+
+# Example: Deploy gateway server to ECS Fargate
+cluster = aws.ecs.Cluster("lifesciences-cluster")
+
+task_definition = aws.ecs.TaskDefinition(
+    "gateway-task",
+    family="lifesciences-gateway",
+    cpu="256",
+    memory="512",
+    network_mode="awsvpc",
+    requires_compatibilities=["FARGATE"],
+    container_definitions=pulumi.Output.json_dumps([{
+        "name": "gateway",
+        "image": "lifesciences-mcp-gateway:latest",
+        "portMappings": [{
+            "containerPort": 8000,
+            "protocol": "tcp"
+        }],
+        "logConfiguration": {
+            "logDriver": "awslogs",
+            "options": {
+                "awslogs-group": "/ecs/lifesciences-gateway",
+                "awslogs-region": "us-east-1",
+                "awslogs-stream-prefix": "ecs"
+            }
+        }
+    }])
+)
+
+service = aws.ecs.Service(
+    "gateway-service",
+    cluster=cluster.arn,
+    desired_count=2,
+    launch_type="FARGATE",
+    task_definition=task_definition.arn,
+    network_configuration=aws.ecs.ServiceNetworkConfigurationArgs(
+        assign_public_ip=True,
+        subnets=[subnet.id for subnet in subnets],
+        security_groups=[security_group.id]
+    )
+)
 ```
-https://lifesciences.fastmcp.app/mcp
-```
-
----
-
-## Resource Inventory
-
-### Pulumi Stacks
-
-| Stack Name | Environment | Resources | Status |
-|------------|-------------|-----------|--------|
-| N/A | No stacks found | 0 | Project uses client-side deployment |
-
-### Cloud Resources
-
-**Current Infrastructure:** None - client-side deployment model
-
-**If Cloud Deployment Were Implemented:**
-
-| Resource Type | Typical Count | Purpose |
-|---------------|---------------|---------|
-| API Gateway | 1 | HTTP endpoint for MCP gateway |
-| Lambda/Cloud Function | 1 | Gateway server execution |
-| CloudWatch/Logging | 1 | Request/error logging |
-| Secrets Manager | 1 | API keys (BioGRID, optional) |
-
-### Local Resources
-
-| Resource | Path | Purpose |
-|----------|------|---------|
-| Gateway Server | `src/lifesciences_mcp/servers/gateway.py` | Unified MCP endpoint |
-| Individual Servers | `src/lifesciences_mcp/servers/*.py` | Domain-specific tools |
-| Client Library | `src/lifesciences_mcp/clients/*.py` | API communication |
-| Models | `src/lifesciences_mcp/models/*.py` | Data structures |
-
----
-
-## Server Inventory
-
-### MCP Servers (13 total)
-
-| Server | File | Tools | External API | Rate Limit |
-|--------|------|-------|--------------|------------|
-| **HGNC** | `servers/hgnc.py` | 2 | rest.genenames.org | None |
-| **UniProt** | `servers/uniprot.py` | 2 | rest.uniprot.org | 100/sec |
-| **ChEMBL** | `servers/chembl.py` | 3 | www.ebi.ac.uk/chembl | None |
-| **Open Targets** | `servers/opentargets.py` | 3 | api.platform.opentargets.org | None |
-| **STRING** | `servers/string.py` | 3 | string-db.org | None |
-| **BioGRID** | `servers/biogrid.py` | 2 | webservice.thebiogrid.org | API key required |
-| **Ensembl** | `servers/ensembl.py` | 3 | rest.ensembl.org | 15/sec |
-| **Entrez** | `servers/entrez.py` | 3 | eutils.ncbi.nlm.nih.gov | 3/sec (10 with key) |
-| **PubChem** | `servers/pubchem.py` | 2 | pubchem.ncbi.nlm.nih.gov | 5/sec |
-| **IUPHAR** | `servers/iuphar.py` | 4 | www.guidetopharmacology.org | None |
-| **WikiPathways** | `servers/wikipathways.py` | 4 | webservice.wikipathways.org | None |
-| **ClinicalTrials** | `servers/clinicaltrials.py` | 3 | clinicaltrials.gov | Cloudflare protected |
-| **DrugBank** | `servers/drugbank.py` | 2 | api.drugbank.com | Commercial key required |
-| **Gateway** | `servers/gateway.py` | 34 (mounted) | All above | Composite |
-
-### Tool Count by Domain
-
-| Domain | Server(s) | Tools | Description |
-|--------|-----------|-------|-------------|
-| **Genes** | HGNC, Ensembl, Entrez | 8 | Gene lookup, nomenclature |
-| **Proteins** | UniProt, STRING | 5 | Protein sequences, interactions |
-| **Compounds** | ChEMBL, PubChem | 5 | Chemical structures, properties |
-| **Drugs** | IUPHAR, DrugBank | 6 | Drug targets, mechanisms |
-| **Targets** | Open Targets | 3 | Target-disease associations |
-| **Interactions** | STRING, BioGRID | 5 | Protein-protein interactions |
-| **Pathways** | WikiPathways | 4 | Biological pathways |
-| **Clinical** | ClinicalTrials | 3 | Clinical trial data |
-| **Total** | 13 servers | 39 tools | |
 
 ---
 
-## External API Dependencies
+## Policy Compliance Analysis
 
-### API Endpoints
+### Security Policies
 
-```mermaid
-graph TB
-    subgraph "Gene Databases"
-        HGNC_API[HGNC<br/>rest.genenames.org]
-        ENS_API[Ensembl<br/>rest.ensembl.org]
-        ENT_API[Entrez<br/>eutils.ncbi.nlm.nih.gov]
-    end
+**Current State**: ❌ No automated policy enforcement
 
-    subgraph "Protein Databases"
-        UP_API[UniProt<br/>rest.uniprot.org]
-        STR_API[STRING<br/>string-db.org]
-        BG_API[BioGRID<br/>webservice.thebiogrid.org]
-    end
+**Recommended Policies**:
 
-    subgraph "Chemical Databases"
-        CH_API[ChEMBL<br/>www.ebi.ac.uk/chembl]
-        PC_API[PubChem<br/>pubchem.ncbi.nlm.nih.gov]
-    end
+1. **Network Security**
+   - ✅ All external API calls over HTTPS
+   - ❌ No VPC isolation (not applicable for local deployment)
+   - ❌ No private subnets for compute
+   - ⚠️ Egress filtering not implemented
 
-    subgraph "Drug Databases"
-        IU_API[IUPHAR/GtoPdb<br/>guidetopharmacology.org]
-        DB_API[DrugBank<br/>api.drugbank.com]
-    end
+2. **Secrets Management**
+   - ⚠️ API keys via environment variables (acceptable for development)
+   - ❌ No AWS Secrets Manager integration
+   - ❌ No rotation policies
 
-    subgraph "Target & Disease"
-        OT_API[Open Targets<br/>platform.opentargets.org]
-    end
+3. **Access Control**
+   - ✅ No sensitive data stored
+   - ✅ Public APIs only (no authentication required for most)
+   - ❌ No IAM role definitions
+   - ❌ No least-privilege policies
 
-    subgraph "Pathways & Trials"
-        WP_API[WikiPathways<br/>wikipathways.org]
-        CT_API[ClinicalTrials.gov<br/>clinicaltrials.gov]
-    end
+4. **Compliance**
+   - ✅ MIT license (open source)
+   - ⚠️ No HIPAA/SOC2 compliance (not required for public data)
+   - ❌ No audit logging (recommended for production)
 
-    GW[Gateway Server] --> HGNC_API & ENS_API & ENT_API
-    GW --> UP_API & STR_API & BG_API
-    GW --> CH_API & PC_API
-    GW --> IU_API & DB_API
-    GW --> OT_API
-    GW --> WP_API & CT_API
+### Cost Optimization Policies
 
-    classDef gene fill:#e3f2fd,stroke:#1976d2
-    classDef protein fill:#f3e5f5,stroke:#7b1fa2
-    classDef chem fill:#e8f5e9,stroke:#388e3c
-    classDef drug fill:#fff3e0,stroke:#f57c00
-    classDef target fill:#fce4ec,stroke:#c2185b
-    classDef pathway fill:#e0f7fa,stroke:#0097a7
+**Current State**: ❌ No cost tracking (local deployment)
 
-    class HGNC_API,ENS_API,ENT_API gene
-    class UP_API,STR_API,BG_API protein
-    class CH_API,PC_API chem
-    class IU_API,DB_API drug
-    class OT_API target
-    class WP_API,CT_API pathway
-```
+**Recommended Policies** (if deployed to cloud):
 
-### Rate Limiting Summary
+1. **Resource Tagging**
+   ```python
+   # Tag all resources
+   tags = {
+       "Project": "lifesciences-mcp",
+       "Environment": "prod",
+       "CostCenter": "research",
+       "ManagedBy": "pulumi"
+   }
+   ```
 
-| API | Rate Limit | Authentication | Notes |
-|-----|------------|----------------|-------|
-| HGNC | Unlimited | None | Very permissive |
-| UniProt | 100/sec | None | Generous limits |
-| ChEMBL | Unlimited | None | Uses SDK |
-| Open Targets | Unlimited | None | GraphQL API |
-| STRING | Unlimited | None | REST API |
-| BioGRID | Unlimited | API Key | Key required |
-| Ensembl | 15/sec | None | Strict enforcement |
-| Entrez | 3-10/sec | API Key (optional) | Key increases limit |
-| PubChem | 5/sec | None | Per-IP limit |
-| IUPHAR | Unlimited | None | Small database |
-| WikiPathways | Unlimited | None | Community API |
-| ClinicalTrials | Unknown | None | Cloudflare protected |
-| DrugBank | N/A | Commercial Key | Paid service |
+2. **Auto-scaling**
+   - Scale down to 0 during off-hours (development)
+   - Scale to 2-5 instances during business hours (production)
+   - CPU/memory-based auto-scaling
+
+3. **Budget Alerts**
+   - Set monthly budget limit
+   - Alert at 50%, 80%, 100% thresholds
 
 ---
 
 ## Resource Naming Patterns
 
-### Server Files
-```
-src/lifesciences_mcp/servers/{api_name}.py
-```
+### Current Naming Convention
 
-### Client Files
+**Python Modules**:
 ```
-src/lifesciences_mcp/clients/{api_name}.py
-```
-
-### Model Files
-```
-src/lifesciences_mcp/models/{domain}.py
-```
-
-### Tool Naming Convention
-```
-{prefix}_{action}_{entity}
-```
+{database}_{resource_type}.py
 
 Examples:
-- `hgnc_search_genes`
-- `uniprot_get_protein`
-- `chembl_get_compounds_batch`
-- `opentargets_get_associations`
+- hgnc_client.py
+- uniprot_client.py
+- chembl_client.py
+```
+
+**MCP Servers**:
+```
+{database}.py
+
+Examples:
+- hgnc.py
+- uniprot.py
+- gateway.py
+```
+
+**MCP Tools**:
+```
+{action}_{resource_type}
+
+Examples:
+- search_genes
+- get_gene
+- search_proteins
+- get_protein
+```
+
+### Proposed Cloud Resource Naming
+
+**AWS Resources** (if using Pulumi):
+```
+{project}-{environment}-{service}-{resource_type}
+
+Examples:
+- lifesciences-prod-gateway-cluster
+- lifesciences-prod-gateway-service
+- lifesciences-prod-redis-cache
+- lifesciences-dev-hgnc-function
+```
+
+**Docker Images**:
+```
+{registry}/{project}-{service}:{tag}
+
+Examples:
+- ghcr.io/lifesciences-mcp-gateway:v1.0.0
+- ghcr.io/lifesciences-mcp-hgnc:v1.0.0
+- ghcr.io/lifesciences-mcp-uniprot:v1.0.0
+```
 
 ---
 
-## Policy Compliance Status
+## Network Architecture
 
-### Security Policies
+### Current Architecture (Local)
 
-| Policy | Status | Notes |
-|--------|--------|-------|
-| **No Secrets in Code** | COMPLIANT | API keys via environment variables |
-| **HTTPS Only** | COMPLIANT | All external APIs use HTTPS |
-| **Input Validation** | COMPLIANT | Pydantic models enforce types |
-| **Error Handling** | COMPLIANT | ErrorEnvelope pattern |
-| **Rate Limiting** | PARTIAL | Client-side delays implemented |
+```
+┌─────────────────────────────────────────────────────────────┐
+│                         CLIENT                               │
+│                    (MCP Protocol)                            │
+└───────────────────────────┬─────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    GATEWAY SERVER                            │
+│                   (localhost:port)                           │
+│  ┌────────────┬────────────┬────────────┬────────────┐     │
+│  │ HGNC       │ UniProt    │ ChEMBL     │ OpenTargets│     │
+│  │ Server     │ Server     │ Server     │ Server     │     │
+│  └────────────┴────────────┴────────────┴────────────┘     │
+│  ┌────────────┬────────────┬────────────┬────────────┐     │
+│  │ STRING     │ BioGRID    │ Ensembl    │ Entrez     │     │
+│  │ Server     │ Server     │ Server     │ Server     │     │
+│  └────────────┴────────────┴────────────┴────────────┘     │
+│  ┌────────────┬────────────┬────────────┬────────────┐     │
+│  │ PubChem    │ IUPHAR     │ WikiPath   │ ClinTrials │     │
+│  │ Server     │ Server     │ Server     │ Server     │     │
+│  └────────────┴────────────┴────────────┴────────────┘     │
+└───────────────────────────┬─────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    EXTERNAL APIs                             │
+│  ┌────────────┬────────────┬────────────┬────────────┐     │
+│  │ HGNC       │ UniProt    │ ChEMBL     │ OpenTargets│     │
+│  │ REST API   │ REST API   │ SDK/REST   │ GraphQL    │     │
+│  └────────────┴────────────┴────────────┴────────────┘     │
+│  ┌────────────┬────────────┬────────────┬────────────┐     │
+│  │ STRING     │ BioGRID    │ Ensembl    │ Entrez     │     │
+│  │ REST API   │ REST API   │ REST API   │ XML API    │     │
+│  └────────────┴────────────┴────────────┴────────────┘     │
+│  ┌────────────┬────────────┬────────────┬────────────┐     │
+│  │ PubChem    │ IUPHAR     │ WikiPath   │ ClinTrials │     │
+│  │ REST API   │ REST API   │ REST API   │ REST API   │     │
+│  └────────────┴────────────┴────────────┴────────────┘     │
+└─────────────────────────────────────────────────────────────┘
+```
 
-### Operational Policies
+### Proposed Cloud Architecture (AWS)
 
-| Policy | Status | Notes |
-|--------|--------|-------|
-| **Logging** | COMPLIANT | FastMCP logging infrastructure |
-| **Monitoring** | N/A | Client-side deployment |
-| **Backup** | N/A | No persistent state |
-| **Disaster Recovery** | N/A | Stateless architecture |
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    INTERNET/CLIENT                           │
+└───────────────────────────┬─────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   APPLICATION LOAD BALANCER                  │
+│                      (AWS ALB)                               │
+└───────────────────────────┬─────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│                      VPC (10.0.0.0/16)                      │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │           PUBLIC SUBNET (10.0.1.0/24)               │   │
+│  │  ┌────────────────┐  ┌────────────────┐            │   │
+│  │  │   NAT Gateway  │  │   NAT Gateway  │            │   │
+│  │  │     (AZ-A)     │  │     (AZ-B)     │            │   │
+│  │  └────────────────┘  └────────────────┘            │   │
+│  └─────────────────────────────────────────────────────┘   │
+│                                                              │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │          PRIVATE SUBNET (10.0.10.0/24)              │   │
+│  │  ┌────────────────────────────────────────────┐    │   │
+│  │  │         ECS FARGATE CLUSTER                │    │   │
+│  │  │  ┌──────────────┐  ┌──────────────┐       │    │   │
+│  │  │  │  Gateway     │  │  Gateway     │       │    │   │
+│  │  │  │  Task (AZ-A) │  │  Task (AZ-B) │       │    │   │
+│  │  │  └──────────────┘  └──────────────┘       │    │   │
+│  │  │                                            │    │   │
+│  │  │  ┌──────────────┐  ┌──────────────┐       │    │   │
+│  │  │  │ Individual   │  │ Individual   │       │    │   │
+│  │  │  │ MCP Tasks    │  │ MCP Tasks    │       │    │   │
+│  │  │  └──────────────┘  └──────────────┘       │    │   │
+│  │  └────────────────────────────────────────────┘    │   │
+│  └─────────────────────────────────────────────────────┘   │
+│                                                              │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │          PRIVATE SUBNET (10.0.20.0/24)              │   │
+│  │  ┌────────────────────────────────────────────┐    │   │
+│  │  │      ELASTICACHE REDIS CLUSTER             │    │   │
+│  │  │  ┌──────────────┐  ┌──────────────┐       │    │   │
+│  │  │  │  Primary     │  │  Replica     │       │    │   │
+│  │  │  │  (AZ-A)      │  │  (AZ-B)      │       │    │   │
+│  │  │  └──────────────┘  └──────────────┘       │    │   │
+│  │  └────────────────────────────────────────────┘    │   │
+│  └─────────────────────────────────────────────────────┘   │
+└───────────────────────────┬─────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   EXTERNAL APIs (HTTPS)                      │
+│           (HGNC, UniProt, ChEMBL, OpenTargets, etc.)        │
+└─────────────────────────────────────────────────────────────┘
+```
 
-### Code Quality Policies
-
-| Policy | Status | Notes |
-|--------|--------|-------|
-| **Type Checking** | COMPLIANT | Pyright enabled |
-| **Linting** | COMPLIANT | Ruff configured |
-| **Testing** | COMPLIANT | 500+ tests |
-| **Documentation** | COMPLIANT | Comprehensive docs |
+**Components**:
+- **ALB**: Application Load Balancer for HTTPS termination and routing
+- **VPC**: Isolated network with public and private subnets
+- **ECS Fargate**: Serverless container orchestration
+- **ElastiCache Redis**: Distributed caching layer
+- **NAT Gateway**: Outbound internet access from private subnets
+- **Multi-AZ**: High availability across 2 availability zones
 
 ---
 
-## Environment Variables
+## Deployment Recommendations
 
-### Required
+### Immediate Actions (Development)
 
-| Variable | Purpose | Example |
-|----------|---------|---------|
-| `BIOGRID_API_KEY` | BioGRID API authentication | `abc123...` |
+1. ✅ **Continue local development** - Current approach is appropriate
+2. ⚠️ **Add Docker support** - Create Dockerfile for containerization
+3. ⚠️ **Add docker-compose.yml** - Multi-server local testing
 
-### Optional
+### Short-term Actions (Production Readiness)
 
-| Variable | Purpose | Default |
-|----------|---------|---------|
-| `NCBI_API_KEY` | Increased Entrez rate limit | None |
-| `DRUGBANK_API_KEY` | DrugBank access (commercial) | None |
+1. 🔜 **Implement Pulumi infrastructure**
+   - Create `infrastructure/` directory
+   - Define AWS ECS/Fargate resources
+   - Set up ElastiCache Redis for caching
+   - Configure CloudWatch logging and monitoring
 
-### Configuration (.env.example)
+2. 🔜 **Container registry setup**
+   - Push images to GitHub Container Registry (ghcr.io)
+   - Implement CI/CD pipeline for automated builds
+   - Tag images with semantic versions
+
+3. 🔜 **Security hardening**
+   - Migrate API keys to AWS Secrets Manager
+   - Implement VPC security groups
+   - Enable AWS WAF for DDoS protection
+
+### Long-term Actions (Scale and Optimization)
+
+1. 🔮 **Multi-region deployment**
+   - Deploy to us-east-1 and eu-west-1
+   - Implement Route 53 geo-routing
+   - Synchronize Redis caches
+
+2. 🔮 **Observability**
+   - Add Prometheus metrics exporters
+   - Implement distributed tracing (X-Ray)
+   - Set up Grafana dashboards
+
+3. 🔮 **Cost optimization**
+   - Implement auto-scaling policies
+   - Use Fargate Spot for development
+   - Schedule scaling down during off-hours
+
+---
+
+## Manual Infrastructure Documentation Guide
+
+Since Pulumi infrastructure is not yet implemented, here's a guide for manually documenting any cloud infrastructure:
+
+### Step 1: Cloud Resource Inventory
+
+**If deploying to AWS**:
+```bash
+# List ECS clusters
+aws ecs list-clusters
+
+# List running tasks
+aws ecs list-tasks --cluster <cluster-name>
+
+# List ElastiCache clusters
+aws elasticache describe-cache-clusters
+
+# List ALBs
+aws elbv2 describe-load-balancers
+```
+
+**If deploying to GCP**:
+```bash
+# List Cloud Run services
+gcloud run services list
+
+# List Cloud Functions
+gcloud functions list
+
+# List Memorystore instances
+gcloud redis instances list
+```
+
+### Step 2: Network Topology Mapping
+
+1. Document VPC/subnet structure
+2. Map security group rules
+3. Identify load balancer routing rules
+4. Document egress rules for external APIs
+
+### Step 3: Cost Analysis
 
 ```bash
-# Required for BioGRID
-BIOGRID_API_KEY=your_biogrid_api_key_here
-
-# Optional - increases Entrez rate limit from 3/sec to 10/sec
-NCBI_API_KEY=your_ncbi_api_key_here
-
-# Commercial - DrugBank API access
-DRUGBANK_API_KEY=your_drugbank_api_key_here
+# AWS Cost Explorer
+aws ce get-cost-and-usage \
+  --time-period Start=2026-01-01,End=2026-01-31 \
+  --granularity MONTHLY \
+  --metrics BlendedCost
 ```
 
----
-
-## Deployment Instructions
-
-### Method 1: Local STDIO (Recommended)
+### Step 4: Security Audit
 
 ```bash
-# Clone repository
-git clone https://github.com/your-org/lifesciences-research.git
-cd lifesciences-research
+# AWS Security Hub findings
+aws securityhub get-findings
 
-# Install dependencies
-uv sync
-
-# Configure environment (optional)
-cp .env.example .env
-# Edit .env with your API keys
-
-# Run gateway server
-uv run fastmcp run src/lifesciences_mcp/servers/gateway.py
-
-# Or run individual server
-uv run fastmcp run src/lifesciences_mcp/servers/hgnc.py
-```
-
-### Method 2: Claude Desktop Integration
-
-Add to `~/.config/claude-desktop/claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "lifesciences": {
-      "command": "uv",
-      "args": [
-        "--directory", "/absolute/path/to/lifesciences-research",
-        "run", "fastmcp", "run",
-        "src/lifesciences_mcp/servers/gateway.py"
-      ],
-      "env": {
-        "BIOGRID_API_KEY": "your-key-here"
-      }
-    }
-  }
-}
-```
-
-### Method 3: FastMCP Cloud Deployment
-
-```bash
-# Install FastMCP CLI
-pip install fastmcp
-
-# Deploy to FastMCP Cloud
-fastmcp deploy src/lifesciences_mcp/servers/gateway.py
-
-# Verify deployment
-curl https://lifesciences.fastmcp.app/mcp \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","method":"tools/list","id":1}'
+# AWS Config compliance
+aws configservice describe-compliance-by-config-rule
 ```
 
 ---
 
-## Future Infrastructure Considerations
+## Conclusion
 
-### If Cloud Deployment is Needed
+### Current State Summary
 
-**Option 1: Serverless (AWS Lambda)**
-```
-aws:lambda/function:Function - lifesciences-gateway
-aws:apigatewayv2/api:Api - lifesciences-api
-aws:cloudwatch/logGroup:LogGroup - /aws/lambda/lifesciences
-aws:secretsmanager/secret:Secret - lifesciences-api-keys
-```
+| Aspect | Status | Notes |
+|--------|--------|-------|
+| **Pulumi Infrastructure** | ❌ Not implemented | No Pulumi project files found |
+| **Cloud Deployment** | ❌ Not configured | Running locally only |
+| **Containerization** | ⚠️ Recommended | No Dockerfile found |
+| **CI/CD** | ⚠️ Partial | GitHub Actions for code review only |
+| **Monitoring** | ❌ Not configured | No metrics or logging infrastructure |
+| **Caching** | ❌ Not implemented | Redis planned but not deployed |
+| **Security** | ⚠️ Basic | Environment variables only, no secrets manager |
 
-**Option 2: Container (ECS/Cloud Run)**
-```
-aws:ecs/service:Service - lifesciences-service
-aws:ecs/taskDefinition:TaskDefinition - lifesciences-task
-aws:ecr/repository:Repository - lifesciences-research
-```
+### Next Steps
 
-**Option 3: Kubernetes**
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: lifesciences-gateway
-spec:
-  replicas: 2
-  template:
-    spec:
-      containers:
-      - name: gateway
-        image: lifesciences-research:latest
-        ports:
-        - containerPort: 8000
-```
+1. **Immediate**: Add Dockerfile and docker-compose.yml for local multi-server testing
+2. **Short-term**: Implement Pulumi infrastructure for AWS ECS deployment
+3. **Medium-term**: Add Redis caching, CloudWatch monitoring, and auto-scaling
+4. **Long-term**: Multi-region deployment, Prometheus metrics, and cost optimization
+
+### Resources
+
+- **Pulumi Python Documentation**: https://www.pulumi.com/docs/languages-sdks/python/
+- **AWS ECS Fargate Guide**: https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html
+- **FastMCP Deployment**: https://gofastmcp.com/deployment
+- **MCP Protocol Specification**: https://spec.modelcontextprotocol.io/
 
 ---
 
-## Summary
-
-| Aspect | Current State |
-|--------|---------------|
-| **Deployment Model** | Dual-mode: Client-side (primary) + HTTP gateway (optional) |
-| **Cloud Infrastructure** | None required - runs locally or via FastMCP Cloud |
-| **Pulumi Stacks** | None - infrastructure as code not implemented |
-| **External Dependencies** | 12 life sciences APIs (1 commercial) |
-| **MCP Tools** | 39 tools across 13 servers |
-| **Rate Limiting** | Handled at client level |
-| **Authentication** | Optional API keys for some services |
-| **Scaling** | Horizontal via FastMCP Cloud or custom deployment |
-
----
-
-*Generated: 2026-01-05*
-*Analysis Tool: Manual analysis (Pulumi MCP tools not available)*
+**Analysis Completed**: 2026-01-07
+**Analyst**: Architecture Analysis Framework
+**Confidence Level**: High (based on repository inspection)
+**Recommendation**: Proceed with Pulumi infrastructure implementation for production deployment

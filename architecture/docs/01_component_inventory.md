@@ -2,1401 +2,910 @@
 
 ## Overview
 
-This document provides a comprehensive inventory of all components in the Life Sciences MCP codebase, excluding analysis framework directories (ra_orchestrators, ra_agents, ra_tools, ra_output) and virtual environment (.venv).
+The Life Sciences MCP (Model Context Protocol) codebase is a comprehensive biological data integration platform that provides unified access to 13+ life sciences databases through a standardized API. The architecture follows a client-server pattern with three main layers:
 
-**Total Code Statistics (Main Project)**:
-- Client Layer: 8,162 lines across 14 client modules
-- Model Layer: 3,403 lines across 18 model modules
-- Server Layer: 2,191 lines across 13 server modules
+1. **Client Layer** (`lifesciences_mcp.clients`): Async HTTP clients for biological databases
+2. **Model Layer** (`lifesciences_mcp.models`): Pydantic data models with cross-reference support
+3. **Server Layer** (`lifesciences_mcp.servers`): FastMCP servers exposing tools via MCP protocol
 
----
+The codebase implements a "Fuzzy-to-Fact" protocol where fuzzy searches return ranked candidates, followed by strict CURIE-based lookups for detailed information. All components use async/await patterns, connection pooling, rate limiting, and comprehensive error handling.
+
+**Code Statistics:**
+- Client modules: ~8,162 lines of code
+- Model modules: ~3,403 lines of code
+- 14 API clients (13 in gateway, 1 requires commercial key)
+- 18 Pydantic model files
+- 15 MCP server implementations
 
 ## Public API
 
-The Life Sciences MCP exposes a comprehensive public API through FastMCP servers and Python client libraries.
+### Primary Entry Points
 
-### 1. Main Package Interface
+#### Gateway Server
+**File:** `src/lifesciences_mcp/servers/gateway.py`
+**Lines:** 1-116
 
-**File**: `src/lifesciences_mcp/__init__.py` (Lines 1-99)
+The unified gateway server that composes all 13 individual MCP servers into a single deployment endpoint. This is the primary public interface for the entire platform.
 
-**Purpose**: Primary public API entry point for the Life Sciences MCP package.
-
-**Public Exports**:
-- **Clients** (Lines 42-53):
-  - `ChEMBLClient` - Compound and bioactivity data
-  - `ClinicalTrialsClient` - Clinical trial search and details
-  - `DrugBankClient` - Drug and drug target information
-  - `HGNCClient` - Gene nomenclature and symbol resolution
-  - `IUPHARClient` - Pharmacological ligands and targets
-  - `LifeSciencesClient` - Base client class
-  - `OpenTargetsClient` - Target-disease associations
-  - `PubChemClient` - Chemical compound data
-  - `UniProtClient` - Protein sequence and annotation
-  - `WikiPathwaysClient` - Biological pathway database
-
-- **Models** (Lines 54-70):
-  - `Compound`, `CompoundSearchCandidate` - ChEMBL compound models
-  - `CrossReferences` - Cross-database identifier registry
-  - `ErrorEnvelope` - Standard error response wrapper
-  - `Gene` - HGNC gene model with cross-references
-  - `Ligand`, `LigandSearchCandidate` - IUPHAR ligand models
-  - `PaginationEnvelope` - Standard pagination wrapper
-  - `PharmacologicalTarget`, `PharmacologicalTargetSearchCandidate` - IUPHAR target models
-  - `Protein`, `ProteinSearchCandidate` - UniProt protein models
-  - `PubChemCompound`, `PubChemSearchCandidate` - PubChem compound models
-  - `SearchCandidate` - Generic search result model
-
-**Usage Pattern**:
+**Entry Point:**
 ```python
-from lifesciences_mcp import HGNCClient, Gene, PaginationEnvelope
+# Line 49: Main gateway server instance
+mcp = FastMCP("Life Sciences MCP Gateway")
 
-async with HGNCClient() as client:
-    result = await client.search_genes("BRCA1")
-```
-
----
-
-### 2. Client Package (`lifesciences_mcp.clients`)
-
-**File**: `src/lifesciences_mcp/clients/__init__.py` (Lines 1-55)
-
-#### 2.1 Base Client
-
-**File**: `src/lifesciences_mcp/clients/base.py` (Lines 1-66)
-
-**Class**: `LifeSciencesClient` (Line 16)
-
-**Purpose**: Base async HTTP client providing connection pooling and common HTTP functionality.
-
-**Public Methods**:
-- `__init__(base_url, timeout=30.0, max_connections=10)` (Lines 23-39) - Initialize client with connection settings
-- `close()` (Lines 56-60) - Close HTTP client and cleanup resources
-- `_get_client()` (Lines 41-54) - Get or create async HTTP client (internal but used by subclasses)
-- `_get(path, **kwargs)` (Lines 62-65) - Make GET request (internal but used by subclasses)
-
-**Design Pattern**: Connection pooling with httpx.AsyncClient
-
----
-
-#### 2.2 HGNC Client (Gene Nomenclature)
-
-**File**: `src/lifesciences_mcp/clients/hgnc.py` (Lines 1-353)
-
-**Class**: `HGNCClient` (Line 29)
-
-**Purpose**: HGNC REST API client implementing Fuzzy-to-Fact protocol for gene symbol resolution.
-
-**Public Methods**:
-- `__aenter__()` (Line 52) - Context manager entry
-- `__aexit__()` (Line 56) - Context manager exit
-- `search_genes(query, slim=False, cursor=None, page_size=50)` (Lines 110-248) - Fuzzy search for genes by name/symbol/alias
-- `get_gene(hgnc_id)` (Lines 273-331) - Get complete gene record by HGNC CURIE
-
-**Private Methods**:
-- `_rate_limited_get(path)` (Lines 62-108) - Rate-limited GET with exponential backoff
-- `_search_by_alias(query)` (Lines 255-271) - Search by alias_symbol field
-- `_build_cross_references(doc)` (Lines 333-344) - Map HGNC response to CrossReferences model
-- `_extract_omim(omim_value)` (Lines 346-352) - Extract OMIM ID from HGNC response
-
-**Rate Limiting**: 10 requests/second with exponential backoff on 429/403/503
-
----
-
-#### 2.3 UniProt Client (Protein Data)
-
-**File**: `src/lifesciences_mcp/clients/uniprot.py` (Lines 1-400+)
-
-**Class**: `UniProtClient` (Line 29)
-
-**Purpose**: UniProt REST API client for protein sequence and annotation data.
-
-**Public Methods**:
-- `__aenter__()` (Line 55) - Context manager entry
-- `__aexit__()` (Line 59) - Context manager exit
-- `search_proteins(query, reviewed=None, organism=None, cursor=None, page_size=25)` (Lines 170-312) - Search proteins
-- `get_protein(uniprot_id, slim=False)` (Lines 314-399) - Get complete protein record
-
-**Private Methods**:
-- `_rate_limited_get(path, **kwargs)` (Lines 65-168) - Rate-limited GET with retry logic
-
-**Rate Limiting**: 1 request/second with exponential backoff
-
----
-
-#### 2.4 ChEMBL Client (Compound Data)
-
-**File**: `src/lifesciences_mcp/clients/chembl.py` (Lines 1-680)
-
-**Class**: `ChEMBLClient` (Line 40)
-
-**Purpose**: ChEMBL REST API client for compound and bioactivity data using ChEMBL Web Services SDK.
-
-**Public Methods**:
-- `search_compounds(query, slim=False, cursor=None, page_size=20)` (Lines 453-517) - Search compounds by name/synonym
-- `get_compound(chembl_id, slim=False)` (Lines 519-586) - Get compound by ChEMBL ID
-- `get_compounds_batch(chembl_ids, slim=False)` (Lines 588-673) - Batch fetch compounds
-- `close()` (Lines 675-679) - Close client (no-op for SDK client)
-
-**Private Methods**:
-- `_rate_limited_sdk_call(sdk_func)` (Lines 94-123) - Rate-limited SDK call wrapper
-- `_sdk_call_with_backoff(sdk_func)` (Lines 125-450) - SDK call with exponential backoff
-
-**Rate Limiting**: 5 requests/second
-
----
-
-#### 2.5 Open Targets Client (Target-Disease Associations)
-
-**File**: `src/lifesciences_mcp/clients/opentargets.py` (Lines 1-730)
-
-**Class**: `OpenTargetsClient` (Line 123)
-
-**Purpose**: Open Targets Platform GraphQL API client for target-disease associations.
-
-**Public Methods**:
-- `__aenter__()` (Line 140) - Context manager entry
-- `__aexit__()` (Line 144) - Context manager exit
-- `search_targets(query, cursor=None, page_size=10)` (Lines 437-519) - Search targets by gene symbol/name
-- `get_target(ensembl_id, slim=False)` (Lines 521-592) - Get target details by Ensembl ID
-- `get_associations(ensembl_id, cursor=None, page_size=10)` (Lines 594-730) - Get disease associations for target
-
-**Private Methods**:
-- `_execute_graphql(query, variables)` (Lines 184-206) - Execute GraphQL query
-- `_rate_limited_graphql(query, variables)` (Lines 208-434) - Rate-limited GraphQL with retry
-
-**Rate Limiting**: 10 requests/second
-
----
-
-#### 2.6 STRING Client (Protein Interactions)
-
-**File**: `src/lifesciences_mcp/clients/string.py` (Lines 1-350+)
-
-**Class**: `STRINGClient` (Line 36)
-
-**Purpose**: STRING database client for protein-protein interaction networks.
-
-**Public Methods**:
-- `__aenter__()` (Line 65) - Context manager entry
-- `__aexit__()` (Line 69) - Context manager exit
-- `search_proteins(query, species=9606, limit=25)` (Lines 117-225) - Search proteins in STRING
-- `get_interactions(string_ids, species=9606, required_score=400, limit=100)` (Lines 227-350) - Get protein interactions
-
-**Private Methods**:
-- `_rate_limited_get(path, params)` (Lines 75-115) - Rate-limited GET request
-
-**Rate Limiting**: 1 request/second
-
----
-
-#### 2.7 BioGRID Client (Genetic Interactions)
-
-**File**: `src/lifesciences_mcp/clients/biogrid.py` (Lines 1-270)
-
-**Class**: `BioGridClient` (Line 40)
-
-**Purpose**: BioGRID REST API client for genetic and protein interaction data.
-
-**Public Methods**:
-- `search_genes(query, species="Homo sapiens", limit=25)` (Lines 120-173) - Search genes in BioGRID
-- `get_interactions(gene_id, species="Homo sapiens", limit=100)` (Lines 175-270) - Get interactions for gene
-
-**Private Methods**:
-- `_rate_limited_get(url, params)` (Lines 70-118) - Rate-limited GET with API key
-
-**Rate Limiting**: 5 requests/second with API key requirement
-
----
-
-#### 2.8 Ensembl Client (Genomic Data)
-
-**File**: `src/lifesciences_mcp/clients/ensembl.py` (Lines 1-600+)
-
-**Class**: `EnsemblClient` (Line 57)
-
-**Purpose**: Ensembl REST API client for genomic data (genes, transcripts).
-
-**Public Methods**:
-- `__aenter__()` (Line 79) - Context manager entry
-- `__aexit__()` (Line 83) - Context manager exit
-- `search_genes(query, species="human", cursor=None, page_size=25)` (Lines 223-366) - Search genes by symbol
-- `get_gene(ensembl_id, slim=False)` (Lines 385-492) - Get gene details by Ensembl ID
-- `get_transcript(transcript_id)` (Lines 494-600) - Get transcript details
-
-**Private Methods**:
-- `_rate_limited_get(path, params=None)` (Lines 101-221) - Rate-limited GET with retry
-- `_get_gene_details(gene_id)` (Lines 368-383) - Fetch detailed gene information
-
-**Rate Limiting**: 15 requests/second
-
----
-
-#### 2.9 Entrez Client (NCBI Gene)
-
-**File**: `src/lifesciences_mcp/clients/entrez.py` (Lines 1-730)
-
-**Class**: `EntrezClient` (Line 40)
-
-**Purpose**: NCBI Entrez E-utilities client for gene database access.
-
-**Public Methods**:
-- `__aenter__()` (Line 67) - Context manager entry
-- `__aexit__()` (Line 71) - Context manager exit
-- `search_genes(query, cursor=None, page_size=20)` (Lines 476-602) - Search genes in NCBI Gene
-- `get_gene(entrez_id)` (Lines 604-691) - Get gene record by Entrez ID
-- `get_pubmed_links(entrez_id, limit=10)` (Lines 693-730) - Get PubMed citations for gene
-
-**Private Methods**:
-- `_rate_limited_get(url, params)` (Lines 77-153) - Rate-limited GET
-- `_esearch(query, retmax, retstart)` (Lines 155-199) - E-utilities search
-- `_esummary(ids)` (Lines 201-218) - E-utilities summary
-- `_efetch(gene_id)` (Lines 220-237) - E-utilities fetch
-- `_elink(gene_id)` (Lines 239-474) - E-utilities link
-
-**Rate Limiting**: 3 requests/second (NCBI guidelines)
-
----
-
-#### 2.10 PubChem Client (Chemical Compounds)
-
-**File**: `src/lifesciences_mcp/clients/pubchem.py` (Lines 1-800)
-
-**Class**: `PubChemClient` (Line 31)
-
-**Purpose**: PubChem PUG REST API client for chemical compound data.
-
-**Public Methods**:
-- `search_compounds(query, cursor=None, page_size=20)` (Lines 411-510) - Search compounds by name
-- `get_compound(pubchem_id, slim=False)` (Lines 693-800) - Get compound by PubChem CID
-
-**Private Methods**:
-- `_rate_limited_get(url, **kwargs)` (Lines 65-113) - Rate-limited GET
-- `_request_with_backoff(url, **kwargs)` (Lines 115-257) - Request with exponential backoff
-- `_search_by_name(name)` (Lines 259-310) - Search compounds by name
-- `_get_compound_properties(cids)` (Lines 312-409) - Get compound properties batch
-- `_get_compound_synonyms(cid)` (Lines 512-565) - Get compound synonyms
-- `_get_compound_xrefs(cid)` (Lines 567-691) - Get compound cross-references
-
-**Rate Limiting**: 5 requests/second
-
----
-
-#### 2.11 IUPHAR Client (Pharmacology)
-
-**File**: `src/lifesciences_mcp/clients/iuphar.py` (Lines 1-720)
-
-**Class**: `IUPHARClient` (Line 26)
-
-**Purpose**: IUPHAR/GtoPdb REST API client for pharmacological ligands and targets.
-
-**Public Methods**:
-- `search_ligands(query, page_size=25)` (Lines 305-371) - Search ligands by name
-- `get_ligand(iuphar_id)` (Lines 415-488) - Get ligand details by IUPHAR ID
-- `search_targets(query, page_size=25)` (Lines 527-597) - Search pharmacological targets
-- `get_target(iuphar_id)` (Lines 641-720) - Get target details by IUPHAR ID
-
-**Private Methods**:
-- `_rate_limited_get(path, retries=0, **kwargs)` (Lines 47-243) - Rate-limited GET with retry
-- `_fetch_ligands(search_term)` (Lines 245-280) - Fetch ligands from API
-- `_fetch_ligand_synonyms(ligand_id)` (Lines 282-303) - Fetch ligand synonyms
-- `_fetch_ligand_detail(ligand_id)` (Lines 373-393) - Fetch ligand details
-- `_fetch_ligand_db_links(ligand_id)` (Lines 395-413) - Fetch ligand database links
-- `_fetch_targets(search_term)` (Lines 490-525) - Fetch targets from API
-- `_fetch_target_detail(target_id)` (Lines 599-619) - Fetch target details
-- `_fetch_target_db_links(target_id)` (Lines 621-639) - Fetch target database links
-
-**Rate Limiting**: 10 requests/second
-
----
-
-#### 2.12 WikiPathways Client (Biological Pathways)
-
-**File**: `src/lifesciences_mcp/clients/wikipathways.py` (Lines 1-800)
-
-**Class**: `WikiPathwaysClient` (Line 41)
-
-**Purpose**: WikiPathways REST API client for biological pathway data.
-
-**Public Methods**:
-- `search_pathways(query, organism=None, cursor=None, page_size=25)` (Lines 278-407) - Search pathways
-- `get_pathway(pathway_id)` (Lines 409-537) - Get pathway details by WikiPathways ID
-- `get_pathways_for_gene(gene_symbol, organism=None, cursor=None, page_size=25)` (Lines 539-673) - Find pathways containing gene
-- `get_pathway_components(pathway_id)` (Lines 675-800) - Get pathway components (data nodes, interactions)
-
-**Private Methods**:
-- `_enforce_rate_limit()` (Lines 68-88) - Enforce rate limit
-- `_request_with_retry(method, url, retries=0, **kwargs)` (Lines 90-185) - Request with exponential backoff
-- `_fetch_cross_references_bulk()` (Lines 187-276) - Bulk fetch cross-references
-
-**Rate Limiting**: 10 requests/second
-
----
-
-#### 2.13 ClinicalTrials Client (Clinical Trials)
-
-**File**: `src/lifesciences_mcp/clients/clinicaltrials.py` (Lines 1-620)
-
-**Class**: `ClinicalTrialsClient` (Line 28)
-
-**Purpose**: ClinicalTrials.gov API v2 client for clinical trial data.
-
-**Public Methods**:
-- `search_trials(query, cursor=None, page_size=20)` (Lines 200-316) - Search clinical trials
-- `get_trial(nct_id)` (Lines 318-514) - Get trial details by NCT ID
-- `get_trial_locations(nct_id)` (Lines 516-620) - Get trial locations
-
-**Private Methods**:
-- `_rate_limited_request(method, url, **kwargs)` (Lines 99-198) - Rate-limited HTTP request
-
-**Rate Limiting**: 10 requests/second
-
----
-
-#### 2.14 DrugBank Client (Drug Data)
-
-**File**: `src/lifesciences_mcp/clients/drugbank.py` (Lines 1-850)
-
-**Class**: `DrugBankClient` (Line 55)
-
-**Purpose**: DrugBank REST API client for drug and drug target information (requires commercial API key).
-
-**Public Methods**:
-- `__aenter__()` (Line 87) - Context manager entry
-- `__aexit__()` (Line 91) - Context manager exit
-- `search_drugs(query, slim=False, cursor=None, page_size=20)` (Lines 618-731) - Search drugs
-- `get_drug(drugbank_id, slim=False)` (Lines 733-850) - Get drug by DrugBank ID
-
-**Private Methods**:
-- `_rate_limited_get(url, params=None)` (Lines 140-616) - Rate-limited GET with API key
-
-**Rate Limiting**: 30 requests/second (commercial tier)
-
----
-
-### 3. Model Package (`lifesciences_mcp.models`)
-
-**File**: `src/lifesciences_mcp/models/__init__.py` (Lines 1-140)
-
-All models follow Pydantic BaseModel with validation and serialization.
-
-#### 3.1 Envelope Models (Standard Wrappers)
-
-**File**: `src/lifesciences_mcp/models/envelopes.py` (Lines 1-145)
-
-**Classes**:
-- `ErrorCode` (Line 16) - Enum of standard error codes
-- `ErrorDetail` (Line 27) - Error detail with recovery hints
-- `ErrorEnvelope` (Line 36) - Standard error response wrapper
-  - Factory methods: `unresolved_entity()`, `entity_not_found()`, `ambiguous_query()`, `rate_limited()`, `upstream_error()`
-- `Pagination` (Line 111) - Pagination metadata
-- `PaginationEnvelope[T]` (Line 119) - Generic pagination wrapper
-  - Factory method: `create(items, cursor, total_count, page_size)`
-
-**Purpose**: Canonical response envelopes per ADR-001 Section 8.
-
----
-
-#### 3.2 Gene Models
-
-**File**: `src/lifesciences_mcp/models/gene.py` (Lines 1-215)
-
-**Classes**:
-- `CrossReferences` (Line 27) - External database identifiers (22-key registry)
-  - Fields: ensembl_gene, ensembl_transcript, uniprot, entrez, refseq, hgnc, omim, orphanet, mondo, efo, chembl, drugbank, pubchem_compound, pubchem_substance, kegg, kegg_pathway, string, biogrid, stitch, iuphar, pdb
-- `SearchCandidate` (Line 145) - Lightweight gene search result
-  - Fields: id (HGNC CURIE), symbol, name, score
-- `Gene` (Line 166) - Complete gene record
-  - Fields: id, symbol, name, status, locus_type, locus_group, location, alias_symbols, alias_names, prev_symbols, prev_names, cross_references
-
-**Constants**:
-- `HGNC_CURIE_PATTERN` (Line 12) - Regex for HGNC:NNNNN format
-
----
-
-#### 3.3 Protein Models
-
-**File**: `src/lifesciences_mcp/models/protein.py` (Lines 1-100)
-
-**Classes**:
-- `ProteinSearchCandidate` (Line 19) - Lightweight protein search result
-  - Fields: id, name, organism, gene_name, score
-- `Protein` (Line 44) - Complete protein record
-  - Fields: id, name, organism, gene_name, sequence, length, function, subcellular_location, cross_references
-
----
-
-#### 3.4 Compound Models
-
-**File**: `src/lifesciences_mcp/models/compound.py` (Lines 1-150)
-
-**Classes**:
-- `CompoundSearchCandidate` (Line 19) - Lightweight compound search result
-  - Fields: id, name, type, max_phase, score
-- `Compound` (Line 73) - Complete compound record from ChEMBL
-  - Fields: id, name, type, synonyms, smiles, inchi, inchi_key, molecular_formula, molecular_weight, max_phase, first_approval, indication_class, cross_references
-
----
-
-#### 3.5 PubChem Compound Models
-
-**File**: `src/lifesciences_mcp/models/pubchem_compound.py` (Lines 1-200)
-
-**Classes**:
-- `PubChemSearchCandidate` (Line 16) - Lightweight PubChem search result
-  - Fields: id, title, score
-- `PubChemCompound` (Line 79) - Complete PubChem compound record
-  - Fields: id, title, iupac_name, smiles, inchi, inchi_key, molecular_formula, molecular_weight, synonyms, cross_references
-
-**Constants**:
-- `PUBCHEM_CURIE_PATTERN` (Line 16) - Regex for PubChem CID format
-
----
-
-#### 3.6 Drug Models
-
-**File**: `src/lifesciences_mcp/models/drug.py` (Lines 1-250)
-
-**Classes**:
-- `DrugCrossReferences` (Line 15) - Drug-specific cross-references
-  - Fields: chembl, pubchem_compound, pubchem_substance, kegg_drug, pharmgkb, rxnorm, atc_codes
-- `DrugSearchCandidate` (Line 72) - Lightweight drug search result
-  - Fields: id, name, type, state, score
-- `Drug` (Line 132) - Complete drug record from DrugBank
-  - Fields: id, name, type, description, cas_number, state, indication, pharmacodynamics, mechanism, toxicity, metabolism, absorption, half_life, protein_binding, route_of_elimination, volume_distribution, clearance, cross_references
-
----
-
-#### 3.7 Pharmacology Models (IUPHAR)
-
-**File**: `src/lifesciences_mcp/models/pharmacology.py` (Lines 1-250)
-
-**Classes**:
-- `LigandSearchCandidate` (Line 33) - Lightweight ligand search result
-  - Fields: id, name, type, species, score
-- `Ligand` (Line 61) - Complete ligand record
-  - Fields: id, name, abbreviation, type, iupac_name, inn, synonyms, species, radioactive, labelled, approved, withdrawn, approval_source, subunit_ids, complex_ids, prodrug_ids, active_ids, comments, cross_references
-- `TargetSearchCandidate` (Line 141) - Lightweight target search result
-  - Fields: id, name, type, family, score
-- `Target` (Line 169) - Complete pharmacological target record
-  - Fields: id, name, abbreviation, systematic_name, type, family, subunits, comments, cross_references
-
----
-
-#### 3.8 Target Models (Open Targets)
-
-**File**: `src/lifesciences_mcp/models/target.py` (Lines 1-250)
-
-**Classes**:
-- `TargetSearchCandidate` (Line 24) - Lightweight target search result
-  - Fields: id, approved_symbol, approved_name, biotype, score
-- `Target` (Line 76) - Complete target record from Open Targets
-  - Fields: id, approved_symbol, approved_name, biotype, description, chromosome, tss, function_descriptions, subcellular_locations, pathways, protein_ids, cross_references
-- `Association` (Line 164) - Target-disease association
-  - Fields: disease_id, disease_name, therapeutic_areas, overall_score, genetic_association, somatic_mutation, known_drug, affected_pathway, literature, animal_model, rna_expression
-
----
-
-#### 3.9 Interaction Models
-
-**File**: `src/lifesciences_mcp/models/interaction.py` (Lines 1-300)
-
-**Classes**:
-- `InteractionSearchCandidate` (Line 25) - Lightweight interaction search result
-  - Fields: id, name, organism, annotation, score
-- `EvidenceScores` (Line 82) - STRING evidence scores
-  - Fields: neighborhood, fusion, cooccurence, coexpression, experimental, database, textmining, combined_score
-- `Interaction` (Line 154) - Protein-protein interaction
-  - Fields: protein_a, protein_b, protein_a_name, protein_b_name, combined_score, evidence_scores
-- `InteractionCrossReferences` (Line 212) - Interaction-specific cross-references
-  - Fields: string, biogrid
-- `InteractionNetwork` (Line 245) - Network of interactions
-  - Fields: query_proteins, interactions, total_count, cross_references
-
----
-
-#### 3.10 BioGRID Models
-
-**File**: `src/lifesciences_mcp/models/biogrid.py` (Lines 1-100)
-
-**Classes**:
-- `BioGridSearchCandidate` (Line 17) - Lightweight gene search result
-  - Fields: id, symbol, organism, score
-- `GeneticInteraction` (Line 34) - Genetic or protein interaction
-  - Fields: biogrid_id, gene_a, gene_b, gene_a_symbol, gene_b_symbol, experimental_system, pubmed_id, throughput, score
-- `BioGridCrossReferences` (Line 62) - BioGRID-specific cross-references
-  - Fields: entrez_gene_a, entrez_gene_b
-- `InteractionResult` (Line 74) - Interaction query result
-  - Fields: query_gene, interactions, total_count, cross_references
-
----
-
-#### 3.11 Ensembl Models
-
-**File**: `src/lifesciences_mcp/models/ensembl.py` (Lines 1-280)
-
-**Classes**:
-- `EnsemblCrossReferences` (Line 35) - Ensembl-specific cross-references
-  - Fields: ensembl_gene, ensembl_transcript, hgnc, entrez, uniprot
-- `GeneSearchCandidate` (Line 117) - Lightweight gene search result
-  - Fields: id, display_name, description, biotype, species, score
-- `EnsemblGene` (Line 149) - Complete Ensembl gene record
-  - Fields: id, display_name, description, biotype, species, assembly_name, seq_region_name, start, end, strand, version, canonical_transcript, transcripts, cross_references
-- `EnsemblTranscript` (Line 212) - Ensembl transcript record
-  - Fields: id, display_name, biotype, species, assembly_name, seq_region_name, start, end, strand, version, parent_gene, is_canonical, translation_id, protein_sequence
-
----
-
-#### 3.12 Entrez Models
-
-**File**: `src/lifesciences_mcp/models/entrez.py` (Lines 1-250)
-
-**Classes**:
-- `GeneSearchCandidate` (Line 23) - Lightweight gene search result
-  - Fields: id, symbol, description, organism, chromosome, map_location, gene_type, score
-- `EntrezCrossReferences` (Line 96) - Entrez-specific cross-references
-  - Fields: entrez, hgnc, ensembl_gene, uniprot, omim, mim
-- `EntrezGene` (Line 177) - Complete Entrez gene record
-  - Fields: id, symbol, description, organism, chromosome, map_location, gene_type, aliases, summary, nomenclature_symbol, nomenclature_name, nomenclature_status, cross_references
-
-**Constants**:
-- `NCBI_GENE_CURIE_PATTERN` (Line 23) - Regex for NCBIGene:NNNNN format
-
----
-
-#### 3.13 Pathway Models
-
-**File**: `src/lifesciences_mcp/models/pathway.py` (Lines 1-150)
-
-**Classes**:
-- `RevisionMetadata` (Line 16) - Pathway revision information
-  - Fields: revision, last_edited, edited_by, description
-- `ComponentCounts` (Line 27) - Pathway component statistics
-  - Fields: data_nodes, interactions, graphical_lines, labels, shapes, groups
-- `Pathway` (Line 40) - Complete pathway record
-  - Fields: id, name, organism, description, url, last_edited, revision, authors, ontology_tags, component_counts
-- `PathwaySearchCandidate` (Line 112) - Lightweight pathway search result
-  - Fields: id, name, organism, revision, score
-
----
-
-#### 3.14 Pathway Component Models
-
-**File**: `src/lifesciences_mcp/models/pathway_components.py` (Lines 1-200)
-
-**Classes**:
-- `DataNode` (Line 19) - Pathway data node (gene, protein, metabolite, etc.)
-  - Fields: id, text_label, type, xref_id, xref_datasource, graphics_center_x, graphics_center_y, graphics_width, graphics_height
-- `Interaction` (Line 86) - Pathway interaction edge
-  - Fields: id, type, source, target, arrow_head
-- `PathwayComponents` (Line 125) - Complete pathway component data
-  - Fields: pathway_id, data_nodes, interactions, total_data_nodes, total_interactions
-
----
-
-#### 3.15 Trial Models
-
-**File**: `src/lifesciences_mcp/models/trial.py` (Lines 1-180)
-
-**Classes**:
-- `TrialSearchCandidate` (Line 13) - Lightweight trial search result
-  - Fields: nct_id, title, status, phase, enrollment, start_date, score
-- `TrialProtocol` (Line 40) - Trial protocol information
-  - Fields: brief_title, official_title, brief_summary, detailed_description, study_type, phases, enrollment, allocation, intervention_model, primary_purpose, masking
-- `EligibilityCriteria` (Line 60) - Trial eligibility
-  - Fields: sex, minimum_age, maximum_age, healthy_volunteers, criteria
-- `Outcome` (Line 74) - Trial outcome measure
-  - Fields: type, measure, time_frame, description
-- `Sponsor` (Line 84) - Trial sponsor information
-  - Fields: name, sponsor_class
-- `Trial` (Line 91) - Complete clinical trial record
-  - Fields: nct_id, protocol, conditions, interventions, start_date, completion_date, last_update_date, overall_status, eligibility, outcomes, sponsors
-
----
-
-#### 3.16 Trial Location Models
-
-**File**: `src/lifesciences_mcp/models/trial_location.py` (Lines 1-50)
-
-**Classes**:
-- `TrialLocation` (Line 10) - Clinical trial site location
-  - Fields: facility, city, state, zip_code, country, status, contact_name, contact_phone, contact_email
-
----
-
-#### 3.17 Provenance Models
-
-**File**: `src/lifesciences_mcp/models/provenance.py` (Lines 1-180)
-
-**Classes**:
-- `Provenance` (Line 35) - Data provenance metadata
-  - Fields: source, query, retrieved_at, version, upstream_id, cursor, method
-- `MCPClaim` (Line 94) - MCP tool call claim
-  - Fields: tool_name, parameters, provenance
-- `BatchProvenance` (Line 137) - Batch operation provenance
-  - Fields: source, retrieved_at, batch_size, successful_ids, failed_ids
-
----
-
-### 4. Server Package (`lifesciences_mcp.servers`)
-
-All servers use FastMCP framework and expose MCP tools via JSON-RPC.
-
-**File**: `src/lifesciences_mcp/servers/__init__.py` (Lines 1-2)
-
-#### 4.1 Gateway Server (Unified Access)
-
-**File**: `src/lifesciences_mcp/servers/gateway.py` (Lines 1-116)
-
-**Purpose**: Unified MCP server composing all 13 individual servers (excluding DrugBank).
-
-**MCP Instance**: `mcp = FastMCP("Life Sciences MCP Gateway")` (Line 49)
-
-**Mounted Servers** (Lines 52-109):
-- `hgnc` - Tools: hgnc_search_genes, hgnc_get_gene
-- `uniprot` - Tools: uniprot_search_proteins, uniprot_get_protein
-- `chembl` - Tools: chembl_search_compounds, chembl_get_compound, chembl_get_compounds_batch
-- `opentargets` - Tools: opentargets_search_targets, opentargets_get_target, opentargets_get_associations
-- `string` - Tools: string_search_proteins, string_get_interactions, string_get_network_image_url
-- `biogrid` - Tools: biogrid_search_genes, biogrid_get_interactions
-- `ensembl` - Tools: ensembl_search_genes, ensembl_get_gene, ensembl_get_transcript
-- `entrez` - Tools: entrez_search_genes, entrez_get_gene, entrez_get_pubmed_links
-- `pubchem` - Tools: pubchem_search_compounds, pubchem_get_compound
-- `iuphar` - Tools: iuphar_search_targets, iuphar_get_target, iuphar_search_ligands, iuphar_get_ligand
-- `wikipathways` - Tools: wikipathways_search_pathways, wikipathways_get_pathway, wikipathways_get_pathways_for_gene, wikipathways_get_pathway_components
-- `clinicaltrials` - Tools: clinicaltrials_search_trials, clinicaltrials_get_trial, clinicaltrials_get_trial_locations
-
-**Usage**: `uv run fastmcp run src/lifesciences_mcp/servers/gateway.py`
-
-**Cloud Deployment**: FastMCP Cloud endpoint at `https://lifesciences.fastmcp.app/mcp`
-
----
-
-#### 4.2 Individual MCP Servers
-
-Each server follows the same pattern:
-1. Initialize FastMCP instance
-2. Define shared client getter
-3. Expose tools via `@mcp.tool` decorators
-
-**HGNC Server**: `src/lifesciences_mcp/servers/hgnc.py` (Lines 1-86)
-- Tools: `search_genes(query, slim, cursor, page_size)`, `get_gene(hgnc_id)`
-
-**UniProt Server**: `src/lifesciences_mcp/servers/uniprot.py` (Lines 1-100)
-- Tools: `search_proteins(query, reviewed, organism, cursor, page_size)`, `get_protein(uniprot_id, slim)`
-
-**ChEMBL Server**: `src/lifesciences_mcp/servers/chembl.py` (Lines 1-130)
-- Tools: `search_compounds(query, slim, cursor, page_size)`, `get_compound(chembl_id, slim)`, `get_compounds_batch(chembl_ids, slim)`
-
-**Open Targets Server**: `src/lifesciences_mcp/servers/opentargets.py` (Lines 1-130)
-- Tools: `search_targets(query, cursor, page_size)`, `get_target(ensembl_id, slim)`, `get_associations(ensembl_id, cursor, page_size)`
-
-**STRING Server**: `src/lifesciences_mcp/servers/string.py` (Lines 1-150)
-- Tools: `search_proteins(query, species, limit)`, `get_interactions(string_ids, species, required_score, limit)`, `get_network_image_url(string_ids, species)`
-
-**BioGRID Server**: `src/lifesciences_mcp/servers/biogrid.py` (Lines 1-100)
-- Tools: `search_genes(query, species, limit)`, `get_interactions(gene_id, species, limit)`
-
-**Ensembl Server**: `src/lifesciences_mcp/servers/ensembl.py` (Lines 1-180)
-- Tools: `search_genes(query, species, cursor, page_size)`, `get_gene(ensembl_id, slim)`, `get_transcript(transcript_id)`
-
-**Entrez Server**: `src/lifesciences_mcp/servers/entrez.py` (Lines 1-160)
-- Tools: `search_genes(query, cursor, page_size)`, `get_gene(entrez_id)`, `get_pubmed_links(entrez_id, limit)`
-
-**PubChem Server**: `src/lifesciences_mcp/servers/pubchem.py` (Lines 1-150)
-- Tools: `search_compounds(query, cursor, page_size)`, `get_compound(pubchem_id, slim)`
-
-**IUPHAR Server**: `src/lifesciences_mcp/servers/iuphar.py` (Lines 1-400)
-- Tools: `search_ligands(query, page_size)`, `get_ligand(iuphar_id)`, `search_targets(query, page_size)`, `get_target(iuphar_id)`
-
-**WikiPathways Server**: `src/lifesciences_mcp/servers/wikipathways.py` (Lines 1-180)
-- Tools: `search_pathways(query, organism, cursor, page_size)`, `get_pathway(pathway_id)`, `get_pathways_for_gene(gene_symbol, organism, cursor, page_size)`, `get_pathway_components(pathway_id)`
-
-**ClinicalTrials Server**: `src/lifesciences_mcp/servers/clinicaltrials.py` (Lines 1-300)
-- Tools: `search_trials(query, cursor, page_size)`, `get_trial(nct_id)`, `get_trial_locations(nct_id)`
-
-**DrugBank Server**: `src/lifesciences_mcp/servers/drugbank.py` (Lines 1-100)
-- Tools: `search_drugs(query, slim, cursor, page_size)`, `get_drug(drugbank_id, slim)`
-- Note: Requires commercial API key
-
----
-
-### 5. Experimental Agent Layer
-
-**File**: `src/lifesciences_agent/__init__.py` (Line 1)
-
-**Note**: This file is empty (1 line), indicating the agent layer is experimental/placeholder.
-
-#### 5.1 Unified Search Aggregator
-
-**File**: `src/lifesciences_agent/aggregator.py` (Lines 1-74)
-
-**Classes**:
-- `AggregatedResult` (Line 10) - Aggregated search results wrapper
-  - Methods: `model_dump_json(exclude_none)`
-- `UnifiedSearch` (Line 18) - Experimental multi-database search orchestrator
-
-**Purpose**: Orchestrates queries across HGNC, UniProt, and Open Targets for improved entity grounding.
-
-**Public Methods**:
-- `__init__()` (Lines 25-28) - Initialize clients
-- `search(query, limit=10)` (Lines 30-73) - Search and re-rank across databases
-
-**Re-ranking Logic**: Exact symbol match > Known alias > Score (with boosting for common aliases like "p53" -> "TP53")
-
-**Status**: Experimental prototype, not part of main API surface
-
----
-
-## Internal Implementation
-
-### 1. Tools Package
-
-**File**: `src/lifesciences_mcp/tools/__init__.py` (Line 1)
-
-**Status**: Empty file (1 line) - placeholder for future tooling
-
----
-
-### 2. Test Infrastructure
-
-#### 2.1 Test Configuration
-
-**File**: `tests/conftest.py`
-
-**Purpose**: Pytest configuration and shared fixtures
-
-#### 2.2 Test Fixtures
-
-**File**: `tests/fixtures/tier1_string_data.py`
-
-**Purpose**: Fixture data for STRING database tests
-
-#### 2.3 Test Suites
-
-**Unit Tests** (`tests/unit/`):
-- test_chembl_client.py - ChEMBL client unit tests
-- test_chembl_models.py - ChEMBL model validation tests
-- test_clinicaltrials_client.py - ClinicalTrials client unit tests
-- test_drugbank_client.py - DrugBank client unit tests
-- test_drugbank_models.py - DrugBank model validation tests
-- test_ensembl_client.py - Ensembl client unit tests
-- test_ensembl_models.py - Ensembl model validation tests
-- test_entrez_client.py - Entrez client unit tests
-- test_entrez_models.py - Entrez model validation tests
-- test_error_envelopes.py - Error envelope tests
-- test_iuphar_client.py - IUPHAR client unit tests
-- test_models.py - Generic model tests
-- test_pharmacology_models.py - Pharmacology model validation tests
-- test_provenance_models.py - Provenance model tests
-- test_pubchem_client.py - PubChem client unit tests
-- test_pubchem_models.py - PubChem model validation tests
-- test_trial_location_models.py - Trial location model tests
-- test_trial_models.py - Trial model validation tests
-- test_wikipathways_client.py - WikiPathways client unit tests
-- test_wikipathways_models.py - WikiPathways model validation tests
-
-**Integration Tests** (`tests/integration/`):
-- test_biogrid_api.py - BioGRID API integration tests
-- test_biogrid_performance.py - BioGRID performance tests
-- test_chembl_api.py - ChEMBL API integration tests
-- test_clinicaltrials_api.py - ClinicalTrials API integration tests
-- test_competency_questions.py - Domain competency validation tests
-- test_concurrency.py - Concurrent request handling tests
-- test_drugbank_api.py - DrugBank API integration tests
-- test_ensembl_api.py - Ensembl API integration tests
-- test_entrez_api.py - Entrez API integration tests
-- test_entrez_performance.py - Entrez performance tests
-- test_error_recovery.py - Error handling and recovery tests
-- test_gateway.py - Gateway server integration tests
-- test_hgnc_api.py - HGNC API integration tests
-- test_iuphar_api.py - IUPHAR API integration tests
-- test_opentargets_api.py - Open Targets API integration tests
-- test_performance.py - General performance tests
-- test_pubchem_api.py - PubChem API integration tests
-- test_string_api.py - STRING API integration tests
-- test_string_performance.py - STRING performance tests
-- test_uniprot_api.py - UniProt API integration tests
-- test_wikipathways_api.py - WikiPathways API integration tests
-
-**Gap Tests** (`tests/gaps/`):
-- test_grounding_gap.py - Entity grounding improvement tests
-
-**Manual Tests** (`tests/manual/`):
-- test_ct_headers.py - ClinicalTrials HTTP header tests
-- test_ct_headers2.py - ClinicalTrials HTTP header tests (variant)
-- test_wikipathways_xref_format.py - WikiPathways cross-reference format tests
-- verify_cloud_deployment.py - Cloud deployment verification
-
----
-
-### 3. Scripts and Utilities
-
-#### 3.1 Showcase Scripts
-
-**File**: `scripts/showcase_nsclc.py`
-
-**Purpose**: Original NSCLC (non-small cell lung cancer) use case demonstration
-
-**File**: `scripts/showcase_nsclc_v2_fastmcp.py` (Lines 1-50+)
-
-**Purpose**: Enhanced NSCLC showcase using FastMCP Cloud deployment via JSON-RPC
-
-**Features**:
-- KRAS targeting scenario
-- EML4-ALK fusion scenario
-- WikiPathways integration
-- ClinicalTrials.gov integration
-- MCP protocol (JSON-RPC 2.0) over HTTP
-
-**MCP Endpoint**: `https://lifesciences.fastmcp.app/mcp`
-
-**File**: `scripts/showcase_nsclc_v2_mcp.py`
-
-**Purpose**: NSCLC showcase variant using MCP protocol
-
----
-
-#### 3.2 Validation and Benchmark Scripts
-
-**File**: `scripts/benchmark_value.py`
-
-**Purpose**: Benchmark value and performance metrics
-
-**File**: `scripts/validate_competency.py`
-
-**Purpose**: Validate domain competency questions
-
-**File**: `scripts/verify_chembl_v2.py`
-
-**Purpose**: Verify ChEMBL v2 integration
-
-**File**: `scripts/verify_swi_snf.py`
-
-**Purpose**: Verify SWI/SNF complex pathway analysis
-
----
-
-#### 3.3 Audit and Compliance
-
-**File**: `docs/qa-audit-2026-01-03/audit_compliance.py`
-
-**Purpose**: QA audit compliance checking
-
-**File**: `tools/audit_compliance.py`
-
-**Purpose**: Compliance audit tooling (duplicate/variant)
-
----
-
-### 4. Claude Skills Integration
-
-#### 4.1 Mermaid Diagram Optimizer Skill
-
-**File**: `skills/mermaid-diagram-optimizer/skill.py` (Lines 1-50+)
-
-**Purpose**: Reusable skill for optimizing Mermaid diagrams with progressive disclosure.
-
-**Classes**:
-- `DiagramSpec` (Line 14) - Diagram specification input
-  - Fields: diagram_type, abstraction_level, entities, relationships, constraints, target_audience
-- `DiagramResult` (Line 26) - Optimized diagram output
-  - Fields: mermaid_code, narrative, metadata, next_steps
-- `MermaidDiagramOptimizer` (Line 35) - Diagram optimization engine
-
-**Methods**:
-- `select_diagram_direction(diagram_type, abstraction_level)` (Lines 38-49) - Select optimal orientation
-
-**Version**: 1.0.0
-
-**Examples**: `skills/mermaid-diagram-optimizer/examples/`
-
----
-
-#### 4.2 MCP Builder Skills
-
-**File**: `.claude/.skills/mcp-builder/scripts/connections.py`
-
-**Purpose**: MCP connection management utilities
-
-**File**: `.claude/.skills/mcp-builder/scripts/evaluation.py`
-
-**Purpose**: MCP evaluation and testing utilities
-
----
-
-## Entry Points
-
-### 1. Gateway Server (Primary Entry Point)
-
-**File**: `src/lifesciences_mcp/servers/gateway.py`
-
-**Entry Point**: Line 114-115
-```python
+# Line 114-115: Command-line entry
 if __name__ == "__main__":
     mcp.run()
 ```
 
-**FastMCP Cloud Deployment**: `src/lifesciences_mcp/servers/gateway.py:mcp`
+**Mounted Services:**
+- HGNC (Gene Nomenclature)
+- UniProt (Protein Data)
+- ChEMBL (Compounds)
+- Open Targets (Target-Disease Associations)
+- STRING (Protein Interactions)
+- BioGRID (Genetic Interactions)
+- Ensembl (Genomic Data)
+- Entrez (NCBI Gene Database)
+- PubChem (Chemical Compounds)
+- IUPHAR/GtoPdb (Pharmacology)
+- WikiPathways (Biological Pathways)
+- ClinicalTrials (Clinical Trial Data)
 
-**Usage**:
-```bash
-# Local development
-uv run fastmcp run src/lifesciences_mcp/servers/gateway.py
+### Public Client Classes
 
-# Production endpoint
-https://lifesciences.fastmcp.app/mcp
+All clients inherit from `LifeSciencesClient` base class and implement async context manager protocol.
+
+#### Base Client
+**File:** `src/lifesciences_mcp/clients/base.py`
+**Lines:** 1-66
+
+```python
+class LifeSciencesClient:
+    """Base async HTTP client for life sciences APIs."""
+
+    # Line 23-39: Initialization with connection pooling
+    def __init__(self, base_url: str, timeout: float = 30.0, max_connections: int = 10)
+
+    # Line 41-54: Get or create async HTTP client
+    async def _get_client(self) -> httpx.AsyncClient
+
+    # Line 56-60: Close HTTP client
+    async def close(self) -> None
+
+    # Line 62-65: Make GET request
+    async def _get(self, path: str, **kwargs: Any) -> httpx.Response
 ```
 
-**Protocol**: JSON-RPC 2.0 over HTTP POST
+#### HGNCClient - Gene Nomenclature
+**File:** `src/lifesciences_mcp/clients/hgnc.py`
+**Lines:** 1-353
 
-**Available Tools**: 40+ tools across 13 data sources (see Section 4.1)
+Primary interface for gene symbol resolution and gene information retrieval.
 
----
+**Key Public Methods:**
+```python
+class HGNCClient(LifeSciencesClient):
+    # Line 110-248: Fuzzy search for genes (Phase 1)
+    async def search_genes(
+        query: str,
+        slim: bool = False,
+        cursor: str | None = None,
+        page_size: int = 50
+    ) -> PaginationEnvelope[SearchCandidate] | ErrorEnvelope
 
-### 2. Individual Server Entry Points
+    # Line 273-331: Strict lookup by HGNC CURIE (Phase 2)
+    async def get_gene(hgnc_id: str) -> Gene | ErrorEnvelope
+```
 
-Each server can be run independently:
+**Constants:**
+- Line 40: `HGNC_BASE_URL = "https://rest.genenames.org"`
+- Line 41: `RATE_LIMIT_DELAY = 0.1` (10 req/s)
+- Line 42: `AMBIGUOUS_THRESHOLD = 100`
 
-**HGNC Server**:
+#### UniProtClient - Protein Data
+**File:** `src/lifesciences_mcp/clients/uniprot.py`
+**Lines:** 1-461
+
+Interface for protein sequence and annotation data from UniProt.
+
+**Key Public Methods:**
+```python
+class UniProtClient(LifeSciencesClient):
+    # Line 170-312: Fuzzy protein search
+    async def search_proteins(
+        query: str,
+        slim: bool = False,
+        cursor: str | None = None,
+        page_size: int = 50
+    ) -> PaginationEnvelope[ProteinSearchCandidate] | ErrorEnvelope
+
+    # Line 314-460: Strict protein lookup by UniProt CURIE
+    async def get_protein(
+        uniprot_id: str,
+        slim: bool = False
+    ) -> Protein | ErrorEnvelope
+```
+
+**Constants:**
+- Line 41: `UNIPROT_BASE_URL = "https://rest.uniprot.org"`
+- Line 42: `RATE_LIMIT_DELAY = 0.1` (10 req/s)
+- Line 46: `MAX_PAGE_SIZE = 500`
+
+#### ChEMBLClient - Compound Data
+**File:** `src/lifesciences_mcp/clients/chembl.py`
+**Lines:** 1-681
+
+Interface for bioactivity data and compound information. Uses synchronous SDK wrapped with `run_in_executor`.
+
+**Key Public Methods:**
+```python
+class ChEMBLClient(LifeSciencesClient):
+    # Line 453-517: Fuzzy compound search
+    async def search_compounds(
+        query: str,
+        slim: bool = False,
+        cursor: str | None = None,
+        page_size: int = 50
+    ) -> PaginationEnvelope[CompoundSearchCandidate] | ErrorEnvelope
+
+    # Line 519-586: Strict compound lookup
+    async def get_compound(
+        chembl_id: str,
+        slim: bool = False
+    ) -> dict[str, Any] | ErrorEnvelope
+
+    # Line 588-673: Batch compound lookup
+    async def get_compounds_batch(
+        chembl_ids: list[str],
+        slim: bool = True
+    ) -> list[dict[str, Any]] | ErrorEnvelope
+```
+
+**Constants:**
+- Line 52: `CHEMBL_BASE_URL = "https://www.ebi.ac.uk/chembl/api/data"`
+- Line 55-56: `RATE_LIMIT_REQUESTS = 10` (10 req/s)
+- Line 59-61: Exponential backoff configuration
+
+#### OpenTargetsClient - Target-Disease Associations
+**File:** `src/lifesciences_mcp/clients/opentargets.py`
+
+GraphQL-based client for disease-target association data.
+
+**Key Public Methods:**
+```python
+class OpenTargetsClient(LifeSciencesClient):
+    async def search_targets(query: str, ...) -> PaginationEnvelope[TargetSearchCandidate] | ErrorEnvelope
+    async def get_target(ensembl_id: str, ...) -> Target | ErrorEnvelope
+    async def get_associations(ensembl_id: str, ...) -> PaginationEnvelope[Association] | ErrorEnvelope
+```
+
+#### STRINGClient - Protein Interactions
+**File:** `src/lifesciences_mcp/clients/string.py`
+
+Interface for protein-protein interaction networks.
+
+**Key Public Methods:**
+```python
+class STRINGClient(LifeSciencesClient):
+    async def search_proteins(query: str, ...) -> PaginationEnvelope[InteractionSearchCandidate] | ErrorEnvelope
+    async def get_interactions(identifiers: list[str], ...) -> InteractionNetwork | ErrorEnvelope
+    async def get_network_image_url(identifiers: list[str], ...) -> dict[str, str] | ErrorEnvelope
+```
+
+**Constants:**
+- `RATE_LIMIT_DELAY = 1.0` (1 req/s)
+- `DEFAULT_SPECIES = 9606` (Homo sapiens)
+- `DEFAULT_SCORE_THRESHOLD = 400` (medium confidence)
+
+#### BioGridClient - Genetic Interactions
+**File:** `src/lifesciences_mcp/clients/biogrid.py`
+
+Interface for genetic and protein interaction data.
+
+**Key Public Methods:**
+```python
+class BioGridClient(LifeSciencesClient):
+    async def search_genes(query: str, ...) -> PaginationEnvelope[BioGridSearchCandidate] | ErrorEnvelope
+    async def get_interactions(gene_symbol: str, ...) -> InteractionResult | ErrorEnvelope
+```
+
+**Constants:**
+- `BASE_URL = "https://webservice.thebiogrid.org"`
+- `RATE_LIMIT = 0.5` (2 req/s)
+
+#### EnsemblClient - Genomic Data
+**File:** `src/lifesciences_mcp/clients/ensembl.py`
+
+Interface for gene and transcript information from Ensembl.
+
+**Key Public Methods:**
+```python
+class EnsemblClient(LifeSciencesClient):
+    async def search_genes(query: str, ...) -> PaginationEnvelope[EnsemblGeneSearchCandidate] | ErrorEnvelope
+    async def get_gene(ensembl_id: str, ...) -> EnsemblGene | ErrorEnvelope
+    async def get_transcript(transcript_id: str, ...) -> EnsemblTranscript | ErrorEnvelope
+```
+
+#### EntrezClient - NCBI Gene Database
+**File:** `src/lifesciences_mcp/clients/entrez.py`
+
+Interface for NCBI Gene database using E-utilities.
+
+**Key Public Methods:**
+```python
+class EntrezClient(LifeSciencesClient):
+    async def search_genes(query: str, ...) -> PaginationEnvelope[EntrezGeneSearchCandidate] | ErrorEnvelope
+    async def get_gene(gene_id: str, ...) -> EntrezGene | ErrorEnvelope
+    async def get_pubmed_links(gene_id: str, ...) -> PaginationEnvelope[dict] | ErrorEnvelope
+```
+
+#### PubChemClient - Chemical Compounds
+**File:** `src/lifesciences_mcp/clients/pubchem.py`
+
+Interface for chemical compound data from PubChem.
+
+**Key Public Methods:**
+```python
+class PubChemClient(LifeSciencesClient):
+    async def search_compounds(query: str, ...) -> PaginationEnvelope[PubChemSearchCandidate] | ErrorEnvelope
+    async def get_compound(cid: str, ...) -> PubChemCompound | ErrorEnvelope
+```
+
+#### IUPHARClient - Pharmacological Data
+**File:** `src/lifesciences_mcp/clients/iuphar.py`
+
+Interface for pharmacological ligand and target data.
+
+**Key Public Methods:**
+```python
+class IUPHARClient(LifeSciencesClient):
+    async def search_ligands(query: str, ...) -> PaginationEnvelope[LigandSearchCandidate] | ErrorEnvelope
+    async def get_ligand(ligand_id: str, ...) -> Ligand | ErrorEnvelope
+    async def search_targets(query: str, ...) -> PaginationEnvelope[PharmacologicalTargetSearchCandidate] | ErrorEnvelope
+    async def get_target(target_id: str, ...) -> PharmacologicalTarget | ErrorEnvelope
+```
+
+#### WikiPathwaysClient - Biological Pathways
+**File:** `src/lifesciences_mcp/clients/wikipathways.py`
+
+Interface for biological pathway data.
+
+**Key Public Methods:**
+```python
+class WikiPathwaysClient(LifeSciencesClient):
+    async def search_pathways(query: str, ...) -> PaginationEnvelope[PathwaySearchCandidate] | ErrorEnvelope
+    async def get_pathway(pathway_id: str, ...) -> Pathway | ErrorEnvelope
+    async def get_pathways_for_gene(gene_symbol: str, ...) -> PaginationEnvelope[PathwaySearchCandidate] | ErrorEnvelope
+    async def get_pathway_components(pathway_id: str, ...) -> PathwayComponents | ErrorEnvelope
+```
+
+#### ClinicalTrialsClient - Clinical Trial Data
+**File:** `src/lifesciences_mcp/clients/clinicaltrials.py`
+
+Interface for clinical trial information from ClinicalTrials.gov.
+
+**Key Public Methods:**
+```python
+class ClinicalTrialsClient(LifeSciencesClient):
+    async def search_trials(query: str, ...) -> PaginationEnvelope[TrialSearchCandidate] | ErrorEnvelope
+    async def get_trial(nct_id: str, ...) -> Trial | ErrorEnvelope
+    async def get_trial_locations(nct_id: str, ...) -> list[TrialLocation] | ErrorEnvelope
+```
+
+#### DrugBankClient - Drug Data (Requires API Key)
+**File:** `src/lifesciences_mcp/clients/drugbank.py`
+
+Interface for comprehensive drug and drug target information (not included in gateway).
+
+**Key Public Methods:**
+```python
+class DrugBankClient(LifeSciencesClient):
+    async def search_drugs(query: str, ...) -> PaginationEnvelope[DrugSearchCandidate] | ErrorEnvelope
+    async def get_drug(drugbank_id: str, ...) -> Drug | ErrorEnvelope
+```
+
+### Public Data Models
+
+All models are Pydantic BaseModel subclasses with validation and serialization support.
+
+#### Core Envelope Models
+**File:** `src/lifesciences_mcp/models/envelopes.py`
+**Lines:** 1-145
+
+```python
+# Line 16-25: Standard error codes
+class ErrorCode(str, Enum):
+    UNRESOLVED_ENTITY = "UNRESOLVED_ENTITY"
+    ENTITY_NOT_FOUND = "ENTITY_NOT_FOUND"
+    AMBIGUOUS_QUERY = "AMBIGUOUS_QUERY"
+    RATE_LIMITED = "RATE_LIMITED"
+    UPSTREAM_ERROR = "UPSTREAM_ERROR"
+    INVALID_CROSS_REFERENCE = "INVALID_CROSS_REFERENCE"
+
+# Line 27-34: Error detail structure
+class ErrorDetail(BaseModel):
+    code: ErrorCode
+    message: str
+    recovery_hint: str
+    invalid_input: str | None = None
+
+# Line 36-108: Standard error envelope
+class ErrorEnvelope(BaseModel):
+    success: bool = False
+    error: ErrorDetail
+
+# Line 111-117: Pagination metadata
+class Pagination(BaseModel):
+    cursor: str | None = None
+    total_count: int | None = None
+    page_size: int = 50
+
+# Line 119-144: Generic pagination envelope
+class PaginationEnvelope(BaseModel, Generic[T]):
+    items: list[T]
+    pagination: Pagination
+```
+
+#### Gene Models
+**File:** `src/lifesciences_mcp/models/gene.py`
+**Lines:** 1-215
+
+```python
+# Line 27-142: Cross-reference model (22-key registry)
+class CrossReferences(BaseModel):
+    ensembl_gene: str | None = None
+    ensembl_transcript: list[str] | None = None
+    uniprot: list[str] | None = None
+    entrez: str | None = None
+    refseq: list[str] | None = None
+    hgnc: str | None = None
+    omim: str | None = None
+    orphanet: str | None = None
+    mondo: str | None = None
+    efo: str | None = None
+    chembl: str | None = None
+    drugbank: str | None = None
+    pubchem_compound: str | None = None
+    pubchem_substance: str | None = None
+    kegg: str | None = None
+    kegg_pathway: list[str] | None = None
+    string: str | None = None
+    biogrid: str | None = None
+    stitch: str | None = None
+    iuphar: str | None = None
+    pdb: list[str] | None = None
+
+# Line 145-163: Search candidate (lightweight)
+class SearchCandidate(BaseModel):
+    id: str  # HGNC CURIE
+    symbol: str
+    name: str
+    score: float  # 0.0-1.0
+
+# Line 166-214: Full gene record
+class Gene(BaseModel):
+    id: str  # HGNC CURIE
+    symbol: str
+    name: str
+    status: str
+    locus_type: str | None = None
+    locus_group: str | None = None
+    location: str | None = None
+    alias_symbols: list[str] | None = None
+    alias_names: list[str] | None = None
+    prev_symbols: list[str] | None = None
+    prev_names: list[str] | None = None
+    cross_references: CrossReferences = Field(default_factory=CrossReferences)
+```
+
+#### Protein Models
+**File:** `src/lifesciences_mcp/models/protein.py`
+
+```python
+class ProteinSearchCandidate(BaseModel):
+    id: str  # UniProtKB CURIE
+    name: str
+    organism: str
+    gene_names: list[str] | None = None
+    score: float
+
+class Protein(BaseModel):
+    id: str  # UniProtKB CURIE
+    accession: str
+    name: str
+    organism: str
+    full_name: str | None = None
+    gene_names: list[str] | None = None
+    organism_id: int | None = None
+    function: str | None = None
+    sequence_length: int | None = None
+    cross_references: CrossReferences | None = None
+```
+
+#### Compound Models
+**File:** `src/lifesciences_mcp/models/compound.py`
+
+```python
+class CompoundSearchCandidate(BaseModel):
+    id: str  # ChEMBL CURIE
+    name: str
+    molecular_formula: str | None = None
+    score: float
+
+class Compound(BaseModel):
+    id: str  # ChEMBL CURIE
+    name: str | None = None
+    molecular_formula: str | None = None
+    molecular_weight: float | None = None
+    smiles: str | None = None
+    inchi: str | None = None
+    canonical_name: str | None = None
+    max_phase: int | None = None
+    indications: list[str] = []
+    synonyms: list[str] = []
+    cross_references: dict[str, list[str]] = {}
+```
+
+#### Interaction Models
+**File:** `src/lifesciences_mcp/models/interaction.py`
+
+```python
+class EvidenceScores(BaseModel):
+    combined_score: int
+    experimental: int | None = None
+    database: int | None = None
+    textmining: int | None = None
+    coexpression: int | None = None
+
+class Interaction(BaseModel):
+    protein_a: str
+    protein_b: str
+    symbol_a: str | None = None
+    symbol_b: str | None = None
+    scores: EvidenceScores
+    cross_references: InteractionCrossReferences | None = None
+
+class InteractionNetwork(BaseModel):
+    query_proteins: list[str]
+    interactions: list[Interaction]
+    network_stats: dict[str, int] | None = None
+```
+
+#### Target Models
+**File:** `src/lifesciences_mcp/models/target.py`
+
+```python
+class TargetSearchCandidate(BaseModel):
+    id: str  # Ensembl gene ID
+    symbol: str
+    name: str
+    score: float
+
+class Association(BaseModel):
+    disease_id: str
+    disease_name: str
+    score: float
+    evidence_count: int | None = None
+
+class Target(BaseModel):
+    id: str  # Ensembl gene ID
+    symbol: str
+    name: str
+    biotype: str | None = None
+    description: str | None = None
+    associations: list[Association] = []
+    cross_references: CrossReferences | None = None
+```
+
+#### Pathway Models
+**File:** `src/lifesciences_mcp/models/pathway.py`
+
+```python
+class PathwaySearchCandidate(BaseModel):
+    id: str  # WikiPathways ID
+    name: str
+    organism: str
+    score: float
+
+class ComponentCounts(BaseModel):
+    genes: int = 0
+    metabolites: int = 0
+    pathways: int = 0
+    interactions: int = 0
+
+class Pathway(BaseModel):
+    id: str
+    name: str
+    organism: str
+    description: str | None = None
+    url: str | None = None
+    component_counts: ComponentCounts | None = None
+    revision: RevisionMetadata | None = None
+```
+
+#### Trial Models
+**File:** `src/lifesciences_mcp/models/trial.py`
+
+```python
+class TrialSearchCandidate(BaseModel):
+    nct_id: str
+    title: str
+    status: str
+    score: float
+
+class Trial(BaseModel):
+    nct_id: str
+    title: str
+    status: str
+    phase: str | None = None
+    sponsor: Sponsor | None = None
+    protocol: TrialProtocol | None = None
+    eligibility: EligibilityCriteria | None = None
+    outcomes: list[Outcome] = []
+```
+
+### Public Aggregator
+
+#### UnifiedSearch - Multi-Database Search
+**File:** `src/lifesciences_agent/aggregator.py`
+**Lines:** 1-74
+
+Experimental aggregator that orchestrates queries across multiple databases for improved entity resolution.
+
+```python
+# Line 18-73: Unified search orchestrator
+class UnifiedSearch:
+    """
+    Experimental Aggregator for resolving biological entities.
+    Orchestrates queries across HGNC, UniProt, and Open Targets.
+    """
+
+    # Line 25-28: Initialize clients
+    def __init__(self)
+
+    # Line 30-73: Multi-database search with re-ranking
+    async def search(self, query: str, limit: int = 10) -> PaginationEnvelope[SearchCandidate]
+```
+
+## Internal Implementation
+
+### Internal Modules
+
+#### Client Utilities and Helpers
+
+**Rate Limiting Implementation**
+- Located in each client's `_rate_limited_get()` method
+- Uses `asyncio.Lock` for thread-safe request serialization
+- Implements exponential backoff with thundering herd prevention
+- Pattern: Re-check timing after acquiring lock to prevent race conditions
+
+**Cross-Reference Mapping**
+- Each client has `_build_cross_references()` or `_map_cross_references()` methods
+- Maps API-specific identifiers to 22-key registry
+- Implements "omit-if-null" pattern (never stores empty strings or empty lists)
+
+**Error Handling**
+- `_map_sdk_error()` methods in SDK-based clients (ChEMBL)
+- Canonical error codes: UNRESOLVED_ENTITY, ENTITY_NOT_FOUND, AMBIGUOUS_QUERY, RATE_LIMITED, UPSTREAM_ERROR
+- All errors include actionable recovery hints for agent self-correction
+
+#### Model Validators
+
+**CURIE Pattern Validation**
+All models validate identifier formats using compiled regex patterns:
+- HGNC: `^HGNC:\d+$`
+- UniProt: `^UniProtKB:[A-Z][A-Z0-9]{5,9}$`
+- ChEMBL: `^CHEMBL:[0-9]+$`
+- Ensembl Gene: `^ENSG\d{11}$`
+- NCBI Gene: `^NCBI_Gene:\d+$`
+- PubChem: `^CID:\d+$`
+
+**Cross-Reference Validation**
+- `CrossReferences.omit_empty_values()` model validator (Line 130-137 in gene.py)
+- Ensures no empty strings or empty lists
+- Automatically excludes None values on serialization
+
+### Internal Classes
+
+#### SDK Wrappers
+
+**ChEMBL SDK Wrapper**
+**File:** `src/lifesciences_mcp/clients/chembl.py`
+
+```python
+# Line 87-92: Thread pool executor for synchronous SDK
+def _get_executor(self) -> ThreadPoolExecutor
+
+# Line 94-123: Rate-limited SDK call wrapper
+async def _rate_limited_sdk_call(self, sdk_func: Any) -> Any
+
+# Line 125-168: SDK call with exponential backoff
+async def _sdk_call_with_backoff(self, sdk_func: Any) -> Any
+```
+
+#### Pagination Cursor Encoding
+
+Multiple clients implement cursor-based pagination:
+
+```python
+# Base64-encoded JSON pattern used by HGNC, ChEMBL, PubChem, etc.
+def _encode_cursor(self, offset: int) -> str:
+    data = json.dumps({"offset": offset})
+    return base64.b64encode(data.encode()).decode()
+
+def _decode_cursor(self, cursor: str | None) -> int:
+    if not cursor:
+        return 0
+    try:
+        data = json.loads(base64.b64decode(cursor).decode())
+        return data.get("offset", 0)
+    except Exception:
+        return 0
+```
+
+#### XML Parsing (Entrez)
+
+**File:** `src/lifesciences_mcp/clients/entrez.py`
+
+Uses `defusedxml` for secure XML parsing to prevent XXE attacks:
+- Parses E-utilities XML responses
+- Extracts gene data from Entrezgene_xref elements
+- Builds cross-references from XML structure
+
+### Internal Functions
+
+#### Search Result Transformers
+
+Each client implements transformation functions:
+
+**ChEMBL:**
+```python
+# Line 246-284: Transform SDK result to search candidate
+def _transform_to_search_candidate(self, sdk_result: dict[str, Any], index: int) -> CompoundSearchCandidate
+
+# Line 359-436: Transform SDK result to full compound
+def _transform_to_compound(self, sdk_result: dict[str, Any], slim: bool = False, ...) -> Compound
+```
+
+**UniProt:**
+```python
+# Line 114-168: Map UniProt cross-references to 22-key registry
+def _map_cross_references(self, uniprot_refs: list[dict[str, Any]]) -> CrossReferences
+```
+
+**HGNC:**
+```python
+# Line 255-271: Search by alias_symbol field
+async def _search_by_alias(self, query: str) -> list[dict[str, Any]]
+
+# Line 333-353: Build cross-references from HGNC response
+def _build_cross_references(self, doc: dict[str, Any]) -> CrossReferences
+```
+
+#### Score Calculation
+
+Fuzzy search results use position-based scoring with decay:
+
+```python
+# Common pattern across clients
+score = max(0.1, 1.0 - (index * SCORE_DECAY))  # SCORE_DECAY typically 0.05
+```
+
+Special boosting for exact matches:
+```python
+# HGNC exact symbol match
+if symbol.upper() == query_upper:
+    score = 1.0
+else:
+    score = max(0.1, 0.95 - (position * self.SCORE_DECAY))
+```
+
+## Entry Points
+
+### MCP Server Entry Points
+
+All server modules follow the same pattern:
+
+**Individual Server Pattern:**
+```python
+# Example: src/lifesciences_mcp/servers/hgnc.py
+from fastmcp import FastMCP
+
+mcp = FastMCP("HGNC Gene Server")  # Line 22
+
+@mcp.tool
+async def search_genes(...):  # Line 36
+    ...
+
+@mcp.tool
+async def get_gene(...):  # Line 67
+    ...
+
+if __name__ == "__main__":
+    mcp.run()  # Line 84-85
+```
+
+**Command-line execution:**
 ```bash
 uv run fastmcp run src/lifesciences_mcp/servers/hgnc.py
 ```
 
-**UniProt Server**:
-```bash
-uv run fastmcp run src/lifesciences_mcp/servers/uniprot.py
-```
-
-**ChEMBL Server**:
-```bash
-uv run fastmcp run src/lifesciences_mcp/servers/chembl.py
-```
-
-**Open Targets Server**:
-```bash
-uv run fastmcp run src/lifesciences_mcp/servers/opentargets.py
-```
-
-**STRING Server**:
-```bash
-uv run fastmcp run src/lifesciences_mcp/servers/string.py
-```
-
-**BioGRID Server**:
-```bash
-uv run fastmcp run src/lifesciences_mcp/servers/biogrid.py
-```
-
-**Ensembl Server**:
-```bash
-uv run fastmcp run src/lifesciences_mcp/servers/ensembl.py
-```
-
-**Entrez Server**:
-```bash
-uv run fastmcp run src/lifesciences_mcp/servers/entrez.py
-```
-
-**PubChem Server**:
-```bash
-uv run fastmcp run src/lifesciences_mcp/servers/pubchem.py
-```
-
-**IUPHAR Server**:
-```bash
-uv run fastmcp run src/lifesciences_mcp/servers/iuphar.py
-```
-
-**WikiPathways Server**:
-```bash
-uv run fastmcp run src/lifesciences_mcp/servers/wikipathways.py
-```
-
-**ClinicalTrials Server**:
-```bash
-uv run fastmcp run src/lifesciences_mcp/servers/clinicaltrials.py
-```
-
-**DrugBank Server** (requires API key):
-```bash
-export DRUGBANK_API_KEY=your_key_here
-uv run fastmcp run src/lifesciences_mcp/servers/drugbank.py
-```
-
----
-
-### 3. Python Client Library Entry Points
-
-**Direct Client Usage** (without MCP server):
-
+**FastMCP Cloud Entry Point:**
 ```python
-# HGNC client example
-from lifesciences_mcp import HGNCClient
-
-async with HGNCClient() as client:
-    # Fuzzy search
-    results = await client.search_genes("BRCA1")
-
-    # Strict lookup
-    gene = await client.get_gene("HGNC:1100")
+# Gateway server: src/lifesciences_mcp/servers/gateway.py:mcp
 ```
 
+### Script Entry Points
+
+#### Showcase Scripts
+
+**NSCLC Research Scenario**
+**File:** `scripts/showcase_nsclc.py`
+**Lines:** 1-100+
+
+Demonstrates KRAS targeting and EML4-ALK fusion scenarios:
 ```python
-# ChEMBL client example
-from lifesciences_mcp import ChEMBLClient
+# Line 32-58: Gene resolution helper
+async def resolve_gene(symbol: str)
 
-async with ChEMBLClient() as client:
-    # Search compounds
-    results = await client.search_compounds("aspirin")
-
-    # Get compound details
-    compound = await client.get_compound("CHEMBL25")
+# Line 61-100+: KRAS scenario orchestration
+async def run_kras_scenario()
 ```
 
-```python
-# Multi-client orchestration
-from lifesciences_mcp import HGNCClient, UniProtClient, OpenTargetsClient
+Entry: `if __name__ == "__main__":`
 
-async with HGNCClient() as hgnc, \
-           UniProtClient() as uniprot, \
-           OpenTargetsClient() as ot:
+**Graph Construction Showcase**
+**File:** `scripts/showcase_graph_construction.py`
 
-    # Resolve gene
-    gene_results = await hgnc.search_genes("TP53")
-    hgnc_id = gene_results.items[0].id
-    gene = await hgnc.get_gene(hgnc_id)
+Demonstrates building knowledge graphs from API data.
 
-    # Get protein
-    uniprot_id = gene.cross_references.uniprot[0]
-    protein = await uniprot.get_protein(uniprot_id)
+**Validation and Verification Scripts**
 
-    # Get disease associations
-    ensembl_id = gene.cross_references.ensembl_gene
-    associations = await ot.get_associations(ensembl_id)
+1. **Competency Validation**
+   - File: `scripts/validate_competency.py`
+   - Purpose: Validate API responses against expected competency questions
+
+2. **ChEMBL Verification**
+   - File: `scripts/verify_chembl_v2.py`
+   - Purpose: Verify ChEMBL API integration
+
+3. **SWI/SNF Verification**
+   - File: `scripts/verify_swi_snf.py`
+   - Purpose: Verify SWI/SNF complex data retrieval
+
+#### Benchmark Scripts
+
+**Value Benchmark**
+**File:** `scripts/benchmark_value.py`
+
+Performance and value benchmarking for API operations.
+
+## Module Dependencies
+
+### Dependency Graph
+
 ```
+lifesciences_mcp/
+├── models/                  (No internal dependencies)
+│   ├── envelopes.py        → Core envelope types (ErrorEnvelope, PaginationEnvelope)
+│   ├── gene.py             → Uses envelopes
+│   ├── protein.py          → Uses gene.CrossReferences, envelopes
+│   ├── compound.py         → Uses envelopes
+│   ├── target.py           → Uses gene.CrossReferences, envelopes
+│   ├── interaction.py      → Uses envelopes
+│   ├── pathway.py          → Uses envelopes
+│   ├── trial.py            → Uses envelopes
+│   └── ...                 → Other specialized models
+│
+├── clients/                 (Depends on models, base)
+│   ├── base.py             → Uses httpx (external)
+│   ├── hgnc.py             → Uses base, models.gene, models.envelopes
+│   ├── uniprot.py          → Uses base, models.protein, models.gene, models.envelopes
+│   ├── chembl.py           → Uses base, models.compound, models.envelopes
+│   ├── opentargets.py      → Uses base, models.target, models.gene, models.envelopes
+│   ├── string.py           → Uses base, models.interaction, models.envelopes
+│   ├── biogrid.py          → Uses base, models.biogrid, models.envelopes
+│   └── ...                 → Other API clients
+│
+├── servers/                 (Depends on clients)
+│   ├── hgnc.py             → Uses clients.HGNCClient, models
+│   ├── uniprot.py          → Uses clients.UniProtClient, models
+│   ├── chembl.py           → Uses clients.ChEMBLClient, models
+│   ├── gateway.py          → Composes ALL servers
+│   └── ...                 → Other MCP servers
+│
+└── lifesciences_agent/      (Depends on clients)
+    └── aggregator.py        → Uses clients.{HGNC,UniProt,OpenTargets}Client
 
----
-
-### 4. Showcase Script Entry Points
-
-**NSCLC Showcase (FastMCP Cloud)**:
-
-**File**: `scripts/showcase_nsclc_v2_fastmcp.py`
-
-**Usage**:
-```bash
-# Point to cloud endpoint
-export MCP_ENDPOINT=https://lifesciences.fastmcp.app/mcp
-python scripts/showcase_nsclc_v2_fastmcp.py
+scripts/                     (Depends on clients and agent)
+├── showcase_nsclc.py        → Uses clients.*, lifesciences_agent.aggregator
+├── validate_competency.py   → Uses clients.*
+└── ...                      → Other scripts
 ```
-
-**Scenarios Demonstrated**:
-1. KRAS targeting in NSCLC
-2. EML4-ALK fusion analysis
-3. Pathway visualization (WikiPathways)
-4. Clinical trial discovery (ClinicalTrials.gov)
-
----
-
-## Architecture Patterns
-
-### 1. Fuzzy-to-Fact Protocol
-
-**Implementation**: All search/get tool pairs follow this pattern
-
-**Phase 1 - Fuzzy Search**:
-- Input: Natural language query or ambiguous term
-- Output: `PaginationEnvelope[SearchCandidate]` with ranked results
-- Example: `search_genes("p53")` returns candidates including "TP53"
-
-**Phase 2 - Strict Lookup**:
-- Input: Validated CURIE from Phase 1
-- Output: Complete entity record with cross-references
-- Example: `get_gene("HGNC:11998")` returns full TP53 gene record
-
-**Enforcement**: CURIE validation in get_* methods returns `ErrorEnvelope` for invalid inputs
-
----
-
-### 2. Canonical Envelopes (ADR-001 Section 8)
-
-**Success Response**: `PaginationEnvelope[T]`
-```json
-{
-  "items": [...],
-  "pagination": {
-    "cursor": "opaque_cursor_string",
-    "total_count": 42,
-    "page_size": 20
-  }
-}
-```
-
-**Error Response**: `ErrorEnvelope`
-```json
-{
-  "success": false,
-  "error": {
-    "code": "UNRESOLVED_ENTITY",
-    "message": "The input 'BRCA' is not a valid HGNC CURIE.",
-    "recovery_hint": "Call search_genes to resolve the identifier first.",
-    "invalid_input": "BRCA"
-  }
-}
-```
-
----
-
-### 3. Cross-Reference Registry (22-Key Registry)
-
-**Implementation**: `CrossReferences` model (gene.py, Lines 27-143)
-
-**Supported Databases**:
-- Core: ensembl_gene, ensembl_transcript, uniprot, entrez, refseq, hgnc
-- Disease: omim, orphanet, mondo, efo
-- Compound: chembl, drugbank, pubchem_compound, pubchem_substance
-- Pathway: kegg, kegg_pathway
-- Interaction: string, biogrid, stitch, iuphar
-- Structure: pdb
-
-**Validation**: Regex patterns for each cross-reference type (gene.py, Lines 14-24)
-
-**Omission Policy**: Keys with no value are omitted (never null or empty string)
-
----
-
-### 4. Rate Limiting Strategy
-
-Each client implements rate limiting appropriate to upstream API:
-
-| Client | Rate Limit | Implementation |
-|--------|------------|----------------|
-| HGNC | 10 req/s | Exponential backoff on 429/403/503 |
-| UniProt | 1 req/s | Lock-based rate limiting |
-| ChEMBL | 5 req/s | SDK-based rate limiting |
-| Open Targets | 10 req/s | GraphQL batching + rate limiting |
-| STRING | 1 req/s | Lock-based rate limiting |
-| BioGRID | 5 req/s | API key + rate limiting |
-| Ensembl | 15 req/s | Exponential backoff |
-| Entrez | 3 req/s | NCBI guidelines compliance |
-| PubChem | 5 req/s | Exponential backoff |
-| IUPHAR | 10 req/s | Retry with backoff |
-| WikiPathways | 10 req/s | Lock-based rate limiting |
-| ClinicalTrials | 10 req/s | Rate-limited requests |
-| DrugBank | 30 req/s | Commercial tier rate limiting |
-
-**Common Pattern**: `_rate_limited_get()` method in each client with async lock and backoff
-
----
-
-### 5. Connection Pooling
-
-**Implementation**: `LifeSciencesClient` base class (base.py, Lines 41-54)
-
-**Features**:
-- httpx.AsyncClient with connection pooling
-- Configurable max_connections (default: 10)
-- Keep-alive connection reuse
-- Automatic cleanup on close()
-
-**Usage**:
-```python
-async with HGNCClient() as client:
-    # Client reuses connections across multiple requests
-    result1 = await client.search_genes("BRCA1")
-    result2 = await client.search_genes("TP53")
-    # Connections automatically closed on context exit
-```
-
----
-
-## Component Dependencies
 
 ### External Dependencies
 
-**HTTP Client**:
-- httpx (async HTTP requests)
+**Core Runtime:**
+- `httpx` - Async HTTP client with connection pooling
+- `pydantic` - Data validation and serialization
+- `fastmcp` - MCP server framework
+- `asyncio` - Async/await runtime
 
-**Data Validation**:
-- pydantic (model validation and serialization)
+**API SDKs:**
+- `chembl_webresource_client` - ChEMBL SDK (synchronous)
 
-**MCP Framework**:
-- fastmcp (MCP server implementation)
+**Security:**
+- `defusedxml` - Secure XML parsing for Entrez
 
-**ChEMBL SDK**:
-- chembl_webresource_client (ChEMBL Web Services SDK)
+**Development/Testing:**
+- `pytest` - Testing framework
+- `pytest-asyncio` - Async test support
+- `python-dotenv` - Environment variable loading
 
-**Environment**:
-- python-dotenv (environment variable management)
+### Cross-Module Patterns
 
-### Internal Dependencies
+1. **Fuzzy-to-Fact Protocol**
+   - Phase 1: `search_*()` returns `PaginationEnvelope[*SearchCandidate]`
+   - Phase 2: `get_*()` requires CURIE, returns full entity
 
-**Dependency Graph**:
-```
-servers/
-  └─> clients/ (async HTTP clients)
-       └─> models/ (Pydantic models)
-            └─> envelopes (canonical responses)
+2. **Error Handling**
+   - All methods return `Result | ErrorEnvelope` union types
+   - Errors include actionable recovery hints
 
-clients/
-  └─> base.py (LifeSciencesClient)
-       └─> httpx.AsyncClient
+3. **Rate Limiting**
+   - All clients implement `_rate_limited_get()` with asyncio.Lock
+   - Exponential backoff with thundering herd prevention
 
-models/
-  └─> pydantic.BaseModel
-       └─> validation patterns
-```
+4. **Cross-References**
+   - 22-key registry defined in `models.gene.CrossReferences`
+   - Omit-if-null pattern (never store empty values)
+   - Each client maps API-specific IDs to registry
 
-**Import Chain**:
-1. Server imports client and models from package root
-2. Client inherits from LifeSciencesClient base
-3. Models inherit from Pydantic BaseModel
-4. Package __init__.py re-exports public API
+5. **Pagination**
+   - Cursor-based (opaque base64-encoded JSON)
+   - Clients with server-side pagination use API cursors
+   - Clients without use client-side slicing with offset cursors
 
----
+6. **Slim Mode**
+   - Optional `slim: bool` parameter reduces token usage
+   - Excludes cross_references, synonyms, detailed fields
+   - Search candidates always lightweight (~20 tokens)
+
+## Architecture Patterns
+
+### Async-First Design
+All I/O operations use async/await with connection pooling and proper resource cleanup.
+
+### Repository Pattern
+Each API client acts as a repository with standardized search/get operations.
+
+### Gateway Pattern
+The gateway server composes multiple services into a unified interface using FastMCP mounting.
+
+### Factory Pattern
+`PaginationEnvelope.create()` and `ErrorEnvelope.*()` class methods provide factory constructors.
+
+### Strategy Pattern
+Rate limiting strategies vary by client based on API requirements (1-15 req/s).
+
+### Builder Pattern
+Cross-reference builders construct complex reference objects from API responses.
 
 ## File Organization Summary
 
-### Source Code Structure
+**Total Python Files:** 121 (excluding framework directories)
 
-```
-src/lifesciences_mcp/
-├── __init__.py              # Public API exports
-├── clients/                 # 14 API clients (8,162 lines)
-│   ├── __init__.py
-│   ├── base.py             # Base client (66 lines)
-│   ├── hgnc.py             # HGNC client (353 lines)
-│   ├── uniprot.py          # UniProt client (400+ lines)
-│   ├── chembl.py           # ChEMBL client (680 lines)
-│   ├── opentargets.py      # Open Targets client (730 lines)
-│   ├── string.py           # STRING client (350+ lines)
-│   ├── biogrid.py          # BioGRID client (270 lines)
-│   ├── ensembl.py          # Ensembl client (600+ lines)
-│   ├── entrez.py           # Entrez client (730 lines)
-│   ├── pubchem.py          # PubChem client (800 lines)
-│   ├── iuphar.py           # IUPHAR client (720 lines)
-│   ├── wikipathways.py     # WikiPathways client (800 lines)
-│   ├── clinicaltrials.py   # ClinicalTrials client (620 lines)
-│   └── drugbank.py         # DrugBank client (850 lines)
-├── models/                  # 18 model modules (3,403 lines)
-│   ├── __init__.py
-│   ├── envelopes.py        # Canonical envelopes (145 lines)
-│   ├── gene.py             # Gene models (215 lines)
-│   ├── protein.py          # Protein models (100 lines)
-│   ├── compound.py         # Compound models (150 lines)
-│   ├── pubchem_compound.py # PubChem models (200 lines)
-│   ├── drug.py             # Drug models (250 lines)
-│   ├── pharmacology.py     # IUPHAR models (250 lines)
-│   ├── target.py           # Target models (250 lines)
-│   ├── interaction.py      # Interaction models (300 lines)
-│   ├── biogrid.py          # BioGRID models (100 lines)
-│   ├── ensembl.py          # Ensembl models (280 lines)
-│   ├── entrez.py           # Entrez models (250 lines)
-│   ├── pathway.py          # Pathway models (150 lines)
-│   ├── pathway_components.py # Pathway component models (200 lines)
-│   ├── trial.py            # Trial models (180 lines)
-│   ├── trial_location.py   # Trial location models (50 lines)
-│   └── provenance.py       # Provenance models (180 lines)
-├── servers/                 # 13 MCP servers (2,191 lines)
-│   ├── __init__.py
-│   ├── gateway.py          # Gateway server (116 lines)
-│   ├── hgnc.py             # HGNC server (86 lines)
-│   ├── uniprot.py          # UniProt server (100 lines)
-│   ├── chembl.py           # ChEMBL server (130 lines)
-│   ├── opentargets.py      # Open Targets server (130 lines)
-│   ├── string.py           # STRING server (150 lines)
-│   ├── biogrid.py          # BioGRID server (100 lines)
-│   ├── ensembl.py          # Ensembl server (180 lines)
-│   ├── entrez.py           # Entrez server (160 lines)
-│   ├── pubchem.py          # PubChem server (150 lines)
-│   ├── iuphar.py           # IUPHAR server (400 lines)
-│   ├── wikipathways.py     # WikiPathways server (180 lines)
-│   ├── clinicaltrials.py   # ClinicalTrials server (300 lines)
-│   └── drugbank.py         # DrugBank server (100 lines)
-└── tools/
-    └── __init__.py          # Placeholder
+**Source Code Structure:**
+- `/src/lifesciences_mcp/clients/` - 14 files, ~8,162 lines
+- `/src/lifesciences_mcp/models/` - 18 files, ~3,403 lines
+- `/src/lifesciences_mcp/servers/` - 15 files
+- `/src/lifesciences_agent/` - 2 files
 
-src/lifesciences_agent/
-├── __init__.py              # Empty (experimental)
-└── aggregator.py            # Unified search (74 lines)
-```
+**Scripts:** 8 showcase/validation scripts
+**Tests:** 40+ test files across unit/integration/e2e
 
-### Supporting Files
+**Configuration:**
+- `pyproject.toml` - Project dependencies and metadata
+- `.env` - Environment variables (API keys)
 
-```
-scripts/                     # Showcase and validation scripts
-├── showcase_nsclc.py
-├── showcase_nsclc_v2_fastmcp.py
-├── showcase_nsclc_v2_mcp.py
-├── benchmark_value.py
-├── validate_competency.py
-├── verify_chembl_v2.py
-└── verify_swi_snf.py
-
-skills/                      # Reusable Claude skills
-└── mermaid-diagram-optimizer/
-    ├── skill.py
-    └── examples/
-
-tests/                       # Comprehensive test suite
-├── conftest.py
-├── fixtures/
-├── unit/                    # 20 unit test files
-├── integration/             # 19 integration test files
-├── gaps/                    # 1 gap test file
-├── manual/                  # 4 manual test files
-└── contract/                # Contract test placeholder
-```
-
----
-
-## Statistics Summary
-
-**Total Components**:
-- 14 Client classes
-- 63 Model classes
-- 13 MCP servers (12 active + 1 requires API key)
-- 40+ MCP tools
-- 44 test files
-- 7 showcase/validation scripts
-- 1 reusable skill
-
-**Code Volume**:
-- Client layer: 8,162 lines
-- Model layer: 3,403 lines
-- Server layer: 2,191 lines
-- Total production code: ~13,756 lines
-
-**API Coverage**:
-- 13 external biological databases
-- 22-key cross-reference registry
-- Fuzzy-to-Fact protocol across all services
-- Canonical envelope pattern (success/error)
-
----
-
-## Key Design Principles
-
-1. **Separation of Concerns**: Clear separation between clients (data access), models (validation), and servers (MCP tools)
-
-2. **Fuzzy-to-Fact Protocol**: Two-phase resolution (search → validate → get) prevents hallucination
-
-3. **Canonical Envelopes**: Standardized response format with pagination and error recovery hints
-
-4. **Rate Limiting**: Respectful API usage with backoff strategies
-
-5. **Cross-Reference Network**: 22-key registry enables cross-database navigation
-
-6. **Connection Pooling**: Efficient resource usage with httpx.AsyncClient
-
-7. **Validation by Default**: Pydantic models enforce data quality at runtime
-
-8. **Context Managers**: Proper resource cleanup with async context managers
-
-9. **Error Recovery**: Agent-actionable error messages with recovery hints
-
-10. **Progressive Disclosure**: Slim mode for token efficiency, full mode for completeness
-
----
-
-*End of Component Inventory*
+This component inventory provides a comprehensive map of the codebase architecture, public APIs, and internal implementation details for understanding and maintaining the Life Sciences MCP platform.

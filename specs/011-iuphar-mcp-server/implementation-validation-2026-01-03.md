@@ -27,7 +27,7 @@ The IUPHAR/GtoPdb MCP Server is **fully implemented and functional** with all 5 
 
 **Evidence**:
 - Tool implemented: `search_ligands(query, type_filter?, approved_only?, cursor?, page_size?)`
-- MCP server: `/home/donbr/graphiti-org/lifesciences-research/src/lifesciences_mcp/servers/iuphar.py` (lines 42-131)
+- MCP server: `src/lifesciences_mcp/servers/iuphar.py` (lines 42-131)
 - Client method: `IUPHARClient.search_ligands()` in `src/lifesciences_mcp/clients/iuphar.py`
 - Model: `LigandSearchCandidate` in `src/lifesciences_mcp/models/pharmacology.py`
 
@@ -62,7 +62,7 @@ The IUPHAR/GtoPdb MCP Server is **fully implemented and functional** with all 5 
 
 **Evidence**:
 - Tool implemented: `get_ligand(iuphar_id)`
-- MCP server: `/home/donbr/graphiti-org/lifesciences-research/src/lifesciences_mcp/servers/iuphar.py` (lines 139-201)
+- MCP server: `src/lifesciences_mcp/servers/iuphar.py` (lines 139-201)
 - Client method: `IUPHARClient.get_ligand()` in `src/lifesciences_mcp/clients/iuphar.py`
 - Model: `Ligand` (full entity) in `src/lifesciences_mcp/models/pharmacology.py`
 
@@ -100,7 +100,7 @@ The IUPHAR/GtoPdb MCP Server is **fully implemented and functional** with all 5 
 
 **Evidence**:
 - Tool implemented: `search_targets(query, type_filter?, cursor?, page_size?)`
-- MCP server: `/home/donbr/graphiti-org/lifesciences-research/src/lifesciences_mcp/servers/iuphar.py` (lines 209-294)
+- MCP server: `src/lifesciences_mcp/servers/iuphar.py` (lines 209-294)
 - Client method: `IUPHARClient.search_targets()` in `src/lifesciences_mcp/clients/iuphar.py`
 - Model: `TargetSearchCandidate` in `src/lifesciences_mcp/models/pharmacology.py`
 
@@ -139,7 +139,7 @@ The IUPHAR/GtoPdb MCP Server is **fully implemented and functional** with all 5 
 
 **Evidence**:
 - Tool implemented: `get_target(iuphar_id)`
-- MCP server: `/home/donbr/graphiti-org/lifesciences-research/src/lifesciences_mcp/servers/iuphar.py` (lines 302-364)
+- MCP server: `src/lifesciences_mcp/servers/iuphar.py` (lines 302-364)
 - Client method: `IUPHARClient.get_target()` in `src/lifesciences_mcp/clients/iuphar.py`
 - Model: `Target` (full entity) in `src/lifesciences_mcp/models/pharmacology.py`
 
