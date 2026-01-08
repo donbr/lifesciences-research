@@ -409,12 +409,16 @@ Most life sciences APIs are public and don't require authentication. However, tw
 # Optional - BioGRID (free registration)
 BIOGRID_API_KEY=your-key-here  # Get from https://thebiogrid.org/
 
+# Optional NCBI (free registration)
+NCBI_API_KEY=your-key-here # Get from https://account.ncbi.nlm.nih.gov/settings/
+
 # Optional - DrugBank (commercial license required)
 DRUGBANK_API_KEY=your-key-here  # Get from https://go.drugbank.com/
 ```
 
 **Note:**
 - **BioGRID**: Free API key available with registration at https://thebiogrid.org/
+- **NCBI**:  Free API key available with registration at https://account.ncbi.nlm.nih.gov/settings/
 - **DrugBank**: Requires commercial license. DrugBank server is excluded from the gateway server and requires manual setup.
 - All other 10 servers work without authentication
 
@@ -493,10 +497,10 @@ See [docs/test_scenarios.md](docs/test_scenarios.md) for the full list.
 - [FastMCP Documentation](https://gofastmcp.com/)
 
 **Architecture Documentation:**
-- [Architecture v4](architecture_v4/README.md) - Complete architecture analysis with 13,505 lines of code across 56 Python modules
+- [Architecture v4](architecture/README.md) - Complete architecture analysis with 13,505 lines of code across 56 Python modules
 - [ADR-001 v1.2](docs/adr/accepted/adr-001-v1.2.md) - Binding architecture specification (Fuzzy-to-Fact protocol)
-- [Component Inventory](architecture_v4/docs/01_component_inventory.md) - Detailed component reference
-- [API Reference](architecture_v4/docs/04_api_reference.md) - Usage guide with examples
+- [Component Inventory](architecture/docs/01_component_inventory.md) - Detailed component reference
+- [API Reference](architecture/docs/04_api_reference.md) - Usage guide with examples
 
 ---
 
