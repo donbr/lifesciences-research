@@ -446,7 +446,8 @@ class WikiPathwaysClient(LifeSciencesClient):
             pathway_info = data.get("pathwayInfo", {})
 
             # Check if pathway exists
-            if not pathway_info or not pathway_info.get("id"):
+            # WikiPathways API returns ID even for non-existent pathways, but leaves name empty
+            if not pathway_info or not pathway_info.get("id") or not pathway_info.get("name"):
                 return ErrorEnvelope(
                     success=False,
                     error={

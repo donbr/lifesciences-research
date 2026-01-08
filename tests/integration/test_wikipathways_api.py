@@ -162,7 +162,7 @@ class TestWikiPathwaysClientIntegration:
     async def test_search_pathways_empty_results(self, client: WikiPathwaysClient):
         """Test search with no results (US1 Scenario 3)."""
         result = await client.search_pathways(
-            query="nonexistent pathway XYZ123456789",
+            query="xyzabc123nonexistent999zzz",
             page_size=10,
         )
 

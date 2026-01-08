@@ -183,6 +183,9 @@ class TestClinicalTrialsErrorRecovery:
         yield client
         await client.close()
 
+    @pytest.mark.skip(
+        reason="ClinicalTrials.gov blocks Python httpx clients via Cloudflare TLS fingerprinting - see CLAUDE.md"
+    )
     async def test_unresolved_entity_recovery_workflow(self, ct_client: ClinicalTrialsClient):
         """T059: Complete UNRESOLVED_ENTITY recovery workflow.
 
@@ -266,6 +269,9 @@ class TestClinicalTrialsErrorRecovery:
                 assert len(result.error.recovery_hint) > 0
                 assert "retry" in result.error.recovery_hint.lower() or "unavailable" in result.error.recovery_hint.lower()
 
+    @pytest.mark.skip(
+        reason="ClinicalTrials.gov blocks Python httpx clients via Cloudflare TLS fingerprinting - see CLAUDE.md"
+    )
     async def test_entity_not_found_recovery_hint(self, ct_client: ClinicalTrialsClient):
         """T062: ENTITY_NOT_FOUND recovery hint for non-existent NCT ID.
 
@@ -288,6 +294,9 @@ class TestClinicalTrialsErrorRecovery:
         assert isinstance(search_result, PaginationEnvelope)
         assert len(search_result.items) > 0
 
+    @pytest.mark.skip(
+        reason="ClinicalTrials.gov blocks Python httpx clients via Cloudflare TLS fingerprinting - see CLAUDE.md"
+    )
     async def test_complete_error_hint_recovery_success_cycle(self, ct_client: ClinicalTrialsClient):
         """T063: Complete error→hint→recovery→success cycle.
 
@@ -323,6 +332,9 @@ class TestClinicalTrialsErrorRecovery:
         assert trial_result.protocol is not None
         assert trial_result.protocol.study_type is not None
 
+    @pytest.mark.skip(
+        reason="ClinicalTrials.gov blocks Python httpx clients via Cloudflare TLS fingerprinting - see CLAUDE.md"
+    )
     async def test_multiple_error_recovery_cycles_clinicaltrials(self, ct_client: ClinicalTrialsClient):
         """Test agent can recover from multiple ClinicalTrials errors in sequence."""
         # Cycle 1: Query string to get_trial (UNRESOLVED_ENTITY)
