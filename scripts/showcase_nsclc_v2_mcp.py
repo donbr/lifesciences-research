@@ -10,7 +10,7 @@ Enhancements from v1:
 - ClinicalTrials.gov integration for active trial discovery
 - Uses MCP protocol tools instead of direct client classes
 
-MCP Server: https://lifesciences.fastmcp.app/mcp
+MCP Server: https://lifesciences-research.fastmcp.app/mcp
 Tools used: hgnc_*, biogrid_*, opentargets_*, string_*, chembl_*,
             wikipathways_*, clinicaltrials_*
 """
@@ -297,7 +297,7 @@ async def main():
     print("Life Sciences MCP Server Showcase v2")
     print("Demonstrating WikiPathways + ClinicalTrials Integration")
     print("=" * 70)
-    print(f"\nMCP Server: https://lifesciences.fastmcp.app/mcp")
+    print(f"\nMCP Server: https://lifesciences-research.fastmcp.app/mcp")
     print(f"Tools: 34 available (HGNC, BioGRID, Open Targets, STRING, ChEMBL,")
     print(f"       WikiPathways, ClinicalTrials, and more)")
 

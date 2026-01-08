@@ -1,10 +1,10 @@
 """End-to-End (E2E) validation suite for the deployed FastMCP Cloud instance.
 
 This module validates the live deployment (HTTP/SSE transport, Cloudflare, Env Vars).
-It runs against the URL defined in the `MCP_SERVER_URL` environment variable.
+It runs against the URL defined in the `FASTMCP_CLOUD_ENDPOINT` environment variable.
 
 Usage:
-    MCP_SERVER_URL=https://lifesciences.fastmcp.app/mcp uv run pytest -v -s tests/e2e/test_competency_questions_cloud.py
+    FASTMCP_CLOUD_ENDPOINT=https://lifesciences-research.fastmcp.app/mcp uv run pytest -v -s tests/e2e/test_competency_questions_cloud.py
 
 Note:
     We select a representative subset of Competency Questions (one per core provider)
@@ -17,11 +17,14 @@ from collections.abc import AsyncGenerator
 import pytest
 import pytest_asyncio
 from fastmcp import Client
+from dotenv import load_dotenv
 
 from tests.utils import to_dict
 
+load_dotenv()
+
 # Default URL for the deployed instance (can be overridden by env var)
-DEFAULT_URL = "https://lifesciences.fastmcp.app/mcp"
+DEFAULT_URL = os.getenv("FASTMCP_CLOUD_ENDPOINT", "https://lifesciences-research.fastmcp.app/mcp")
 
 pytestmark = pytest.mark.e2e
 
@@ -29,7 +32,7 @@ pytestmark = pytest.mark.e2e
 @pytest_asyncio.fixture(scope="function")
 async def client() -> AsyncGenerator[Client, None]:
     """Create a shared FastMCP Client connection for the module."""
-    url = os.getenv("MCP_SERVER_URL", DEFAULT_URL)
+    url = os.getenv("FASTMCP_CLOUD_ENDPOINT", DEFAULT_URL)
     print(f"\nConnecting to MCP Server: {url}")
 
     async with Client(url) as c:
