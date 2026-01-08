@@ -45,9 +45,20 @@ class LifeSciencesClient:
                 max_connections=self._max_connections,
                 max_keepalive_connections=self._max_connections,
             )
+            # Granular timeout configuration to prevent hanging tests
+            # - connect: 5s (fail fast if service unreachable)
+            # - read: 30s (allow time for slow API responses)
+            # - write: 10s (reasonable for request transmission)
+            # - pool: 5s (acquiring connection from pool)
+            timeout = httpx.Timeout(
+                connect=5.0,
+                read=self._timeout,
+                write=10.0,
+                pool=5.0,
+            )
             self._client = httpx.AsyncClient(
                 base_url=self.base_url,
-                timeout=httpx.Timeout(self._timeout),
+                timeout=timeout,
                 limits=limits,
                 headers={"Accept": "application/json"},
             )

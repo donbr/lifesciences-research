@@ -1,0 +1,6 @@
+{
+  "enabledPlugins": {
+    "biorender@life-sciences": true,
+    "pubmed@life-sciences": true
+  }
+}
