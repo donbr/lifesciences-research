@@ -10,7 +10,7 @@ Enhancements from v1:
 - ClinicalTrials.gov integration for active trial discovery
 - Uses MCP protocol (JSON-RPC 2.0) over HTTP to deployed FastMCP Cloud endpoint
 
-MCP Endpoint: https://lifesciences.fastmcp.app/mcp
+MCP Endpoint: https://lifesciences-research.fastmcp.app/mcp
 Protocol: JSON-RPC 2.0
 Transport: HTTP POST
 
@@ -39,10 +39,10 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(levelname)s - %(message)s")
 logger = logging.getLogger("nsclc_showcase_v2")
 
-# MCP endpoint (use environment variable or default to local)
+# MCP endpoint (use environment variable or default to FastMCP Cloud)
 import os
-MCP_ENDPOINT = os.getenv("MCP_ENDPOINT", "http://localhost:8000/mcp")
-# For FastMCP Cloud: export MCP_ENDPOINT=https://lifesciences.fastmcp.app/mcp
+MCP_ENDPOINT = os.getenv("FASTMCP_CLOUD_ENDPOINT", "https://lifesciences-research.fastmcp.app/mcp")
+# For local testing: export FASTMCP_CLOUD_ENDPOINT=http://localhost:8000/mcp
 
 
 class MCPClient:

@@ -1,8 +1,12 @@
 import asyncio
+import os
 import sys
 from fastmcp import Client
+from dotenv import load_dotenv
 
-SERVER_URL = "https://lifesciences.fastmcp.app/mcp"
+load_dotenv()
+
+SERVER_URL = os.getenv("FASTMCP_CLOUD_ENDPOINT", "https://lifesciences-research.fastmcp.app/mcp")
 
 async def main():
     print(f"Connecting to {SERVER_URL}...")
