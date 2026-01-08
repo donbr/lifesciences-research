@@ -187,7 +187,8 @@ async def test_cq5_kras_synthetic_lethality():
 
 
 @pytest.mark.asyncio
-async def test_cq6_fusion_protein_therapy():
+@pytest.mark.timeout(30)
+async def test_cq6_fusion_protein_therapy(check_iuphar_available):
     """CQ-6: ALK inhibitors (Crizotinib) from IUPHAR.
 
     MCP Tool: iuphar_search_ligands
