@@ -34,7 +34,8 @@ from lifesciences_mcp.models.envelopes import (
     Pagination,
     PaginationEnvelope,
 )
-from lifesciences_mcp.models.gene import CrossReferences, Gene, SearchCandidate
+from lifesciences_mcp.models.cross_references import CrossReferences
+from lifesciences_mcp.models.gene import Gene, SearchCandidate
 from lifesciences_mcp.models.interaction import (
     EvidenceScores,
     Interaction,
