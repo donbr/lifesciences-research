@@ -220,102 +220,30 @@ uv run pytest tests/unit/test_clinicaltrials_client.py -v                  # 13 
 
 ## Example Usage
 
-### HGNC Server (Gene Nomenclature)
+All 12 servers follow the **Fuzzy-to-Fact** pattern: fuzzy search → get candidate → strict lookup with cross-references.
+
+### Basic Pattern (HGNC)
 
 ```python
 from lifesciences_mcp.clients import HGNCClient
 
 async with HGNCClient() as client:
-    # Fuzzy search for genes
+    # Phase 1: Fuzzy search
     results = await client.search_genes("BRCA")
     # Returns: PaginationEnvelope[SearchCandidate]
 
-    # Strict lookup by HGNC CURIE
+    # Phase 2: Strict lookup by CURIE
     gene = await client.get_gene("HGNC:1100")  # BRCA1
     # Returns: Gene with cross_references to UniProt, Ensembl, OMIM, etc.
 ```
 
-### UniProt Server (Protein Search & Lookup)
-
-```python
-from lifesciences_mcp.clients import UniProtClient
-
-async with UniProtClient() as client:
-    # Phase 1: Fuzzy search for proteins
-    results = await client.search_proteins("p53 tumor suppressor", page_size=10)
-    # Returns: PaginationEnvelope[ProteinSearchCandidate]
-
-    # Get top candidate
-    top_candidate = results.items[0]
-    print(f"{top_candidate.id}: {top_candidate.name} ({top_candidate.organism})")
-    # Output: UniProtKB:P04637: Cellular tumor antigen p53 (Homo sapiens)
-
-    # Phase 2: Strict lookup with complete protein record
-    protein = await client.get_protein(top_candidate.id)
-    # Returns: Protein with cross_references to HGNC, Ensembl, RefSeq, PDB, OMIM, etc.
-    print(f"Function: {protein.function[:100]}...")
-    print(f"Cross-refs: HGNC:{protein.cross_references.hgnc}, Ensembl:{protein.cross_references.ensembl_transcript}")
-```
-
-### PubChem Server (Chemical Compound Search & Lookup)
-
-```python
-from lifesciences_mcp.clients import PubChemClient
-
-async with PubChemClient() as client:
-    # Phase 1: Fuzzy search for compounds
-    results = await client.search_compounds("aspirin", page_size=10)
-    # Returns: PaginationEnvelope[PubChemSearchCandidate]
-
-    # Get top candidate
-    top_candidate = results.items[0]
-    print(f"{top_candidate.id}: {top_candidate.name} ({top_candidate.molecular_formula})")
-    # Output: PubChem:CID2244: Aspirin (C9H8O4)
-
-    # Phase 2: Strict lookup with complete compound record
-    compound = await client.get_compound(top_candidate.id)
-    # Returns: PubChemCompound with SMILES, InChI, cross_references
-    print(f"SMILES: {compound.canonical_smiles}")
-    print(f"InChI: {compound.inchi[:50]}...")
-    print(f"Cross-refs: ChEMBL:{compound.cross_references.get('chembl')}, DrugBank:{compound.cross_references.get('drugbank')}")
-
-    # Token-efficient slim mode
-    compound_slim = await client.get_compound("PubChem:CID2244", slim=True)
-    # Returns only: id, name, molecular_formula (~20 tokens vs ~115-300)
-```
-
-### WikiPathways Server (Biological Pathways)
-
-```python
-from lifesciences_mcp.clients import WikiPathwaysClient
-
-async with WikiPathwaysClient() as client:
-    # Phase 1: Search for pathways
-    results = await client.search_pathways("EGFR signaling", species="Homo sapiens")
-    print(f"Found {len(results.items)} pathways")
-
-    # Get pathway details
-    pathway = await client.get_pathway(results.items[0].id)
-    print(f"Pathway: {pathway.name}")
-    print(f"Components: {pathway.component_counts.genes} genes, {pathway.component_counts.metabolites} metabolites")
-
-    # Find pathways for a specific gene
-    gene_pathways = await client.get_pathways_for_gene("EGFR", species="Homo sapiens")
-    print(f"EGFR appears in {len(gene_pathways.items)} pathways")
-
-    # Get pathway components (graph structure)
-    components = await client.get_pathway_components(pathway.id)
-    print(f"Data nodes: {len(components.data_nodes)}")
-    print(f"Interactions: {len(components.interactions)}")
-```
-
-### ClinicalTrials.gov Server (Clinical Trials)
+### Advanced Pattern (ClinicalTrials.gov)
 
 ```python
 from lifesciences_mcp.clients import ClinicalTrialsClient
 
 async with ClinicalTrialsClient() as client:
-    # Phase 1: Search clinical trials
+    # Phase 1: Multi-filter search
     results = await client.search_trials(
         query="cancer immunotherapy",
         condition="lung cancer",
@@ -323,53 +251,42 @@ async with ClinicalTrialsClient() as client:
         status="RECRUITING"
     )
 
-    # Get trial details
+    # Phase 2: Get trial details
     trial = await client.get_trial(results.items[0].id)
-    print(f"Trial: {trial.title}")
-    print(f"Phase: {trial.phase}")
-    print(f"Status: {trial.status}")
-    print(f"Enrollment: {trial.enrollment}")
+    print(f"Trial: {trial.title}, Phase: {trial.phase}, Enrollment: {trial.enrollment}")
 
-    # Get trial locations
+    # Phase 3: Get trial locations
     locations = await client.get_trial_locations(trial.id)
-    print(f"Trial sites: {len(locations)}")
     for loc in locations[:3]:
         print(f"  - {loc.facility_name}, {loc.city}, {loc.state}")
 ```
 
 ### MCP Tool Interface
 
-All servers expose their functionality as MCP tools:
+All servers expose functionality as MCP tools:
 
 ```python
-# HGNC tools
-await mcp.call_tool("search_genes", {"query": "BRCA", "page_size": 5})
-await mcp.call_tool("get_gene", {"hgnc_id": "HGNC:1100"})
+# Gene lookup (HGNC, Ensembl, Entrez)
+await mcp.call_tool("hgnc_search_genes", {"query": "BRCA", "page_size": 5})
+await mcp.call_tool("hgnc_get_gene", {"hgnc_id": "HGNC:1100"})
 
-# UniProt tools
-await mcp.call_tool("search_proteins", {"query": "insulin", "page_size": 10})
-await mcp.call_tool("get_protein", {"uniprot_id": "UniProtKB:P04637", "slim": False})
+# Protein lookup (UniProt, STRING, BioGRID)
+await mcp.call_tool("uniprot_search_proteins", {"query": "insulin", "page_size": 10})
+await mcp.call_tool("uniprot_get_protein", {"uniprot_id": "UniProtKB:P04637"})
 
-# PubChem tools
-await mcp.call_tool("search_compounds", {"query": "aspirin", "page_size": 10})
-await mcp.call_tool("get_compound", {"pubchem_id": "PubChem:CID2244", "slim": False})
+# Compound lookup (ChEMBL, PubChem)
+await mcp.call_tool("chembl_search_compounds", {"query": "aspirin"})
+await mcp.call_tool("pubchem_get_compound", {"pubchem_id": "PubChem:CID2244"})
 
-# WikiPathways tools
-await mcp.call_tool("search_pathways", {"query": "EGFR signaling", "species": "Homo sapiens"})
-await mcp.call_tool("get_pathway", {"pathway_id": "WP:WP4868"})
-await mcp.call_tool("get_pathways_for_gene", {"gene_symbol": "EGFR", "species": "Homo sapiens"})
-await mcp.call_tool("get_pathway_components", {"pathway_id": "WP:WP4868"})
-
-# ClinicalTrials.gov tools
-await mcp.call_tool("search_trials", {
+# Clinical trials
+await mcp.call_tool("clinicaltrials_search_trials", {
     "query": "cancer immunotherapy",
-    "condition": "lung cancer",
     "phase": "PHASE3",
     "status": "RECRUITING"
 })
-await mcp.call_tool("get_trial", {"nct_id": "NCT:00461032"})
-await mcp.call_tool("get_trial_locations", {"nct_id": "NCT:00461032"})
 ```
+
+> **For complete examples of all 12 servers**, see [API Reference](architecture/docs/04_api_reference.md).
 
 ---
 
