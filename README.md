@@ -57,7 +57,7 @@ This makes Open Targets an excellent starting point for AI-driven drug discovery
 
 | Server | API | Status | Description |
 |--------|-----|--------|-------------|
-| `chembl-mcp` | [ChEMBL](https://www.ebi.ac.uk/chembl/) | **✅ Complete** | 15M+ bioactivity data points, 1.9M compounds - 112 tests passing ([spec](specs/003-chembl-mcp-server/)) |
+| `chembl-mcp` | [ChEMBL](https://www.ebi.ac.uk/chembl/) | **✅ Complete** | 15M+ bioactivity data points, 1.9M compounds - 62 tests passing ([spec](specs/003-chembl-mcp-server/)) |
 | `opentargets-mcp` | [Open Targets](https://platform.opentargets.org/) | **✅ Complete** | Target-disease associations, drug repurposing - 9 tests passing ([spec](specs/004-opentargets-mcp-server/)) |
 | `drugbank-mcp` | [DrugBank](https://go.drugbank.com/) | **⛔ BLOCKED** | 500K+ drugs, clinical interactions - 33 unit tests (requires commercial API key) ([spec](specs/005-drugbank-mcp-server/)) |
 
@@ -65,9 +65,9 @@ This makes Open Targets an excellent starting point for AI-driven drug discovery
 
 | Server | API | Status | Description |
 |--------|-----|--------|-------------|
-| `hgnc-mcp` | [HGNC](https://www.genenames.org/) | **✅ Complete** | Gene nomenclature, symbol resolution - 21 tests passing ([spec](specs/001-hgnc-mcp-server/)) |
-| `uniprot-mcp` | [UniProt](https://www.uniprot.org/) | **✅ Complete** | Protein search & lookup (fuzzy-to-fact, cross-DB, error recovery) - 29 tests passing ([spec](specs/002-uniprot-mcp-server/)) |
-| `string-mcp` | [STRING](https://string-db.org/) | **✅ Complete** | Protein-protein interactions with evidence scores - 12 tests passing ([spec](specs/006-string-mcp-server/)) |
+| `hgnc-mcp` | [HGNC](https://www.genenames.org/) | **✅ Complete** | Gene nomenclature, symbol resolution - 7 tests passing ([spec](specs/001-hgnc-mcp-server/)) |
+| `uniprot-mcp` | [UniProt](https://www.uniprot.org/) | **✅ Complete** | Protein search & lookup (fuzzy-to-fact, cross-DB, error recovery) - 12 tests passing ([spec](specs/002-uniprot-mcp-server/)) |
+| `string-mcp` | [STRING](https://string-db.org/) | **✅ Complete** | Protein-protein interactions with evidence scores - 11 tests passing ([spec](specs/006-string-mcp-server/)) |
 | `biogrid-mcp` | [BioGRID](https://thebiogrid.org/) | **✅ Complete** | Genetic/protein interactions - 11 tests passing ([spec](specs/007-biogrid-mcp-server/)) |
 
 ### Tier 2: Pharmacology & Interactions
@@ -76,7 +76,7 @@ This makes Open Targets an excellent starting point for AI-driven drug discovery
 |--------|-----|--------|-------------|
 | `iuphar-mcp` | [GtoPdb](https://www.guidetopharmacology.org/) | **✅ Complete** | Pharmacological targets, ligand-receptor interactions - 59 tests passing ([spec](specs/011-iuphar-mcp-server/)) |
 | `stitch-mcp` | [STITCH](http://stitch.embl.de/) | Planned | Chemical-protein interactions |
-| `pubchem-mcp` | [PubChem](https://pubchem.ncbi.nlm.nih.gov/) | **✅ Complete** | Chemical structures, cross-references - 100 tests passing ([spec](specs/010-pubchem-mcp-server/)) |
+| `pubchem-mcp` | [PubChem](https://pubchem.ncbi.nlm.nih.gov/) | **✅ Complete** | Chemical structures, cross-references - 85 tests passing ([spec](specs/010-pubchem-mcp-server/)) |
 
 ### Tier 3: Pathways & Clinical Trials
 
@@ -103,8 +103,7 @@ This makes Open Targets an excellent starting point for AI-driven drug discovery
 - 🔜 **4 servers planned** - STITCH, KEGG, OMIM, Orphanet
 
 **Test Coverage:**
-- Total integration tests: 500+ passing
-- Total unit tests: 100+ passing
+- Total tests: 691 passing (integration + unit combined)
 - Coverage: All 12 operational servers have comprehensive test suites
 - Gateway server: 34+ MCP tools from 12 databases
 
@@ -206,16 +205,16 @@ uv run pytest -m integration -v
 # Test specific server
 uv run pytest tests/integration/test_hgnc_api.py -v -m integration         # 7 tests ✅
 uv run pytest tests/integration/test_uniprot_api.py -v -m integration      # 12 tests ✅
-uv run pytest tests/integration/test_chembl_api.py -v -m integration       # 50+ tests ✅
+uv run pytest tests/integration/test_chembl_api.py -v -m integration       # 20 tests ✅
 uv run pytest tests/integration/test_opentargets_api.py -v -m integration  # 9 tests ✅
 uv run pytest tests/integration/test_drugbank_api.py -v -m integration     # 7 tests (⛔ skipped without API key)
-uv run pytest tests/integration/test_string_api.py -v -m integration       # 12 tests ✅
+uv run pytest tests/integration/test_string_api.py -v -m integration       # 11 tests ✅
 uv run pytest tests/integration/test_biogrid_api.py -v -m integration      # 11 tests ✅
 uv run pytest tests/integration/test_iuphar_api.py -v -m integration       # 48 tests ✅
 uv run pytest tests/integration/test_pubchem_api.py -v -m integration      # 19 tests ✅
 uv run pytest tests/integration/test_ensembl_api.py -v -m integration      # 24 tests ✅
 uv run pytest tests/integration/test_entrez_api.py -v -m integration       # 20 tests ✅
-uv run pytest tests/integration/test_wikipathways_api.py -v -m integration # Integration tests ✅
+uv run pytest tests/integration/test_wikipathways_api.py -v -m integration # 17 tests ✅
 uv run pytest tests/unit/test_clinicaltrials_client.py -v                  # 13 unit tests ✅
 ```
 
@@ -533,6 +532,7 @@ We use these tools to perform real-world analysis. All outputs are validated for
 - [ADR-001 v1.3](docs/adr/accepted/adr-001-v1.3.md) - Binding architecture specification (Fuzzy-to-Fact protocol)
 - [Component Inventory](architecture/docs/01_component_inventory.md) - Detailed component reference
 - [API Reference](architecture/docs/04_api_reference.md) - Usage guide with examples
+- [Competency Questions Catalog](docs/competency-questions-catalog.md) - Research questions for knowledge graph building with the lifesciences-graph-builder skill
 
 ---
 
