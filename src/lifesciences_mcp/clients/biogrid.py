@@ -320,7 +320,7 @@ class BioGridClient(LifeSciencesClient):
             return ErrorEnvelope(
                 error=ErrorDetail(
                     code=ErrorCode.UPSTREAM_ERROR,
-                    message=f"Unexpected error: {e!s}",
+                    message=f"Unexpected error: {e!r}",
                     recovery_hint="Check network connection and BioGRID API status",
                     invalid_input=gene_symbol,
                 )

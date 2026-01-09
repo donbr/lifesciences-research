@@ -7,7 +7,7 @@ and model serialization for both ligand and target entities.
 import pytest
 from pydantic import ValidationError
 
-from lifesciences_mcp.models.gene import CrossReferences
+from lifesciences_mcp.models.cross_references import CrossReferences
 from lifesciences_mcp.models.pharmacology import (
     IUPHAR_CURIE_PATTERN,
     Ligand,

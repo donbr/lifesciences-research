@@ -18,9 +18,9 @@ from lifesciences_mcp.models.envelopes import (
     ErrorEnvelope,
     PaginationEnvelope,
 )
+from lifesciences_mcp.models.cross_references import CrossReferences
 from lifesciences_mcp.models.gene import (
     HGNC_CURIE_PATTERN,
-    CrossReferences,
     Gene,
     SearchCandidate,
 )
@@ -341,7 +341,17 @@ class HGNCClient(LifeSciencesClient):
             entrez=doc.get("entrez_id"),
             refseq=doc.get("refseq_accession") or None,
             omim=self._extract_omim(doc.get("omim_id")),
+            orphanet=self._extract_orphanet(doc.get("orphanet")),
+            ucsc=f"UCSC:{doc.get('ucsc_id')}" if doc.get("ucsc_id") else None,
+            pubmed=[f"PMID:{pmid}" for pmid in doc.get("pubmed_id", [])] or None,
         )
+
+    def _extract_orphanet(self, orpha_value: Any) -> str | None:
+        """Extract Orphanet ID and format as CURIE."""
+        if not orpha_value:
+            return None
+        # HGNC returns int or str (e.g., 120204), we want "ORPHA:120204"
+        return f"ORPHA:{orpha_value}"
 
     def _extract_omim(self, omim_value: Any) -> str | None:
         """Extract OMIM ID, handling list format from HGNC."""

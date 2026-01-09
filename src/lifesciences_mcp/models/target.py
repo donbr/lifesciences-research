@@ -13,7 +13,7 @@ import re
 
 from pydantic import BaseModel, Field, field_validator
 
-from lifesciences_mcp.models.gene import CrossReferences
+from lifesciences_mcp.models.cross_references import CrossReferences
 
 # Regex patterns for ID validation (from research.md R3)
 ENSEMBL_GENE_ID_PATTERN = re.compile(r"^ENSG\d{11}$")
