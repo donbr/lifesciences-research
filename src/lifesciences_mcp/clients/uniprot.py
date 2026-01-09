@@ -19,7 +19,7 @@ from lifesciences_mcp.models.envelopes import (
     ErrorEnvelope,
     PaginationEnvelope,
 )
-from lifesciences_mcp.models.gene import CrossReferences
+from lifesciences_mcp.models.cross_references import CrossReferences
 from lifesciences_mcp.models.protein import (
     Protein,
     ProteinSearchCandidate,

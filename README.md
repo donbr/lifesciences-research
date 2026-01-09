@@ -438,6 +438,18 @@ uv run ruff check --fix . && uv run ruff format .
 uv run pyright
 ```
 
+## Developing New Servers (SpecKit v2)
+
+We provide a standardized process for creating new MCP servers that comply with our [Architectural Standards](docs/adr/accepted/adr-001-v1.3.md).
+
+- **[SpecKit Standard Prompt v2](docs/speckit-standard-prompt-v2.md)**: The "Master Prompt" for generating high-quality, compliant MCP servers.
+- **[Scaffold Process Timeline](docs/speckit-scaffold-process-timeline-v2.md)**: The step-by-step lifecycle for scaffolding, implementing, and verifying new servers.
+
+To scaffold a new server:
+1. Copy the [Standard Prompt](docs/speckit-standard-prompt-v2.md).
+2. Paste it into your AI assistant.
+3. Follow the generated implementation plan.
+
 ### Testing with FastMCP
 
 ```python
@@ -518,7 +530,7 @@ We use these tools to perform real-world analysis. All outputs are validated for
 
 **Architecture Documentation:**
 - [Architecture](architecture/README.md) - Complete architecture analysis with 13,505 lines of code across 56 Python modules
-- [ADR-001 v1.2](docs/adr/accepted/adr-001-v1.2.md) - Binding architecture specification (Fuzzy-to-Fact protocol)
+- [ADR-001 v1.3](docs/adr/accepted/adr-001-v1.3.md) - Binding architecture specification (Fuzzy-to-Fact protocol)
 - [Component Inventory](architecture/docs/01_component_inventory.md) - Detailed component reference
 - [API Reference](architecture/docs/04_api_reference.md) - Usage guide with examples
 
@@ -534,3 +546,20 @@ MIT
 
 - **Linear Project**: [Life Sciences MCP Server](https://linear.app/agentic-wisdom/project/life-sciences-mcp-server-fc36d8f8e64f)
 - **Discovery Issue**: [AGE-65](https://linear.app/agentic-wisdom/issue/AGE-65)
+
+## Acknowledgements
+
+This project leverages public APIs and data from the following rigorous scientific efforts. We gratefully acknowledge their contributions:
+
+- **[HGNC](https://www.genenames.org/)**: HUGO Gene Nomenclature Committee at the European Bioinformatics Institute.
+- **[UniProt](https://www.uniprot.org/)**: Universal Protein Resource.
+- **[ChEMBL](https://www.ebi.ac.uk/chembl/)**: European Bioinformatics Institute (EMBL-EBI).
+- **[Open Targets](https://platform.opentargets.org/)**: A partnership between EMBL-EBI, Wellcome Sanger Institute, and GSK.
+- **[STRING](https://string-db.org/)**: STRING Consortium.
+- **[BioGRID](https://thebiogrid.org/)**: Tyers Lab at the University of Montreal.
+- **[IUPHAR/BPS Guide to Pharmacology](https://www.guidetopharmacology.org/)**: International Union of Basic and Clinical Pharmacology.
+- **[PubChem](https://pubchem.ncbi.nlm.nih.gov/)**: National Center for Biotechnology Information (NCBI).
+- **[WikiPathways](https://www.wikipathways.org/)**: WikiPathways Community.
+- **[ClinicalTrials.gov](https://clinicaltrials.gov/)**: U.S. National Library of Medicine.
+- **[Ensembl](https://www.ensembl.org/)**: EMBL-EBI.
+- **[NCBI Gene](https://www.ncbi.nlm.nih.gov/gene)**: National Center for Biotechnology Information.

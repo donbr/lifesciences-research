@@ -8,7 +8,7 @@ import re
 
 from pydantic import BaseModel, Field, field_validator
 
-from lifesciences_mcp.models.gene import CrossReferences
+from lifesciences_mcp.models.cross_references import CrossReferences
 
 # UniProt CURIE validation pattern (from R6 research)
 # Format: UniProtKB:[A-Z][A-Z0-9]{5,9}

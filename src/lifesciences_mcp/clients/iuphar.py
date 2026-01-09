@@ -19,7 +19,7 @@ import httpx
 
 from lifesciences_mcp.clients.base import LifeSciencesClient
 from lifesciences_mcp.models.envelopes import ErrorCode, ErrorDetail, ErrorEnvelope
-from lifesciences_mcp.models.gene import CrossReferences
+from lifesciences_mcp.models.cross_references import CrossReferences
 from lifesciences_mcp.models.pharmacology import HTML_TAG_PATTERN
 
 

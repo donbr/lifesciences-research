@@ -16,7 +16,7 @@ from typing import Annotated, Any
 
 from pydantic import BaseModel, Field, field_validator
 
-from lifesciences_mcp.models.gene import CrossReferences
+from lifesciences_mcp.models.cross_references import CrossReferences
 
 # IUPHAR CURIE pattern: "IUPHAR:12345"
 IUPHAR_CURIE_PATTERN = re.compile(r"^IUPHAR:\d+$")
