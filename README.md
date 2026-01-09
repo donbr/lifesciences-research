@@ -57,7 +57,7 @@ This makes Open Targets an excellent starting point for AI-driven drug discovery
 
 | Server | API | Status | Description |
 |--------|-----|--------|-------------|
-| `chembl-mcp` | [ChEMBL](https://www.ebi.ac.uk/chembl/) | **✅ Complete** | 15M+ bioactivity data points, 1.9M compounds - 112 tests passing ([spec](specs/003-chembl-mcp-server/)) |
+| `chembl-mcp` | [ChEMBL](https://www.ebi.ac.uk/chembl/) | **✅ Complete** | 15M+ bioactivity data points, 1.9M compounds - 62 tests passing ([spec](specs/003-chembl-mcp-server/)) |
 | `opentargets-mcp` | [Open Targets](https://platform.opentargets.org/) | **✅ Complete** | Target-disease associations, drug repurposing - 9 tests passing ([spec](specs/004-opentargets-mcp-server/)) |
 | `drugbank-mcp` | [DrugBank](https://go.drugbank.com/) | **⛔ BLOCKED** | 500K+ drugs, clinical interactions - 33 unit tests (requires commercial API key) ([spec](specs/005-drugbank-mcp-server/)) |
 
@@ -65,9 +65,9 @@ This makes Open Targets an excellent starting point for AI-driven drug discovery
 
 | Server | API | Status | Description |
 |--------|-----|--------|-------------|
-| `hgnc-mcp` | [HGNC](https://www.genenames.org/) | **✅ Complete** | Gene nomenclature, symbol resolution - 21 tests passing ([spec](specs/001-hgnc-mcp-server/)) |
-| `uniprot-mcp` | [UniProt](https://www.uniprot.org/) | **✅ Complete** | Protein search & lookup (fuzzy-to-fact, cross-DB, error recovery) - 29 tests passing ([spec](specs/002-uniprot-mcp-server/)) |
-| `string-mcp` | [STRING](https://string-db.org/) | **✅ Complete** | Protein-protein interactions with evidence scores - 12 tests passing ([spec](specs/006-string-mcp-server/)) |
+| `hgnc-mcp` | [HGNC](https://www.genenames.org/) | **✅ Complete** | Gene nomenclature, symbol resolution - 7 tests passing ([spec](specs/001-hgnc-mcp-server/)) |
+| `uniprot-mcp` | [UniProt](https://www.uniprot.org/) | **✅ Complete** | Protein search & lookup (fuzzy-to-fact, cross-DB, error recovery) - 12 tests passing ([spec](specs/002-uniprot-mcp-server/)) |
+| `string-mcp` | [STRING](https://string-db.org/) | **✅ Complete** | Protein-protein interactions with evidence scores - 11 tests passing ([spec](specs/006-string-mcp-server/)) |
 | `biogrid-mcp` | [BioGRID](https://thebiogrid.org/) | **✅ Complete** | Genetic/protein interactions - 11 tests passing ([spec](specs/007-biogrid-mcp-server/)) |
 
 ### Tier 2: Pharmacology & Interactions
@@ -76,7 +76,7 @@ This makes Open Targets an excellent starting point for AI-driven drug discovery
 |--------|-----|--------|-------------|
 | `iuphar-mcp` | [GtoPdb](https://www.guidetopharmacology.org/) | **✅ Complete** | Pharmacological targets, ligand-receptor interactions - 59 tests passing ([spec](specs/011-iuphar-mcp-server/)) |
 | `stitch-mcp` | [STITCH](http://stitch.embl.de/) | Planned | Chemical-protein interactions |
-| `pubchem-mcp` | [PubChem](https://pubchem.ncbi.nlm.nih.gov/) | **✅ Complete** | Chemical structures, cross-references - 100 tests passing ([spec](specs/010-pubchem-mcp-server/)) |
+| `pubchem-mcp` | [PubChem](https://pubchem.ncbi.nlm.nih.gov/) | **✅ Complete** | Chemical structures, cross-references - 85 tests passing ([spec](specs/010-pubchem-mcp-server/)) |
 
 ### Tier 3: Pathways & Clinical Trials
 
@@ -103,8 +103,7 @@ This makes Open Targets an excellent starting point for AI-driven drug discovery
 - 🔜 **4 servers planned** - STITCH, KEGG, OMIM, Orphanet
 
 **Test Coverage:**
-- Total integration tests: 500+ passing
-- Total unit tests: 100+ passing
+- Total tests: 691 passing (integration + unit combined)
 - Coverage: All 12 operational servers have comprehensive test suites
 - Gateway server: 34+ MCP tools from 12 databases
 
@@ -206,117 +205,45 @@ uv run pytest -m integration -v
 # Test specific server
 uv run pytest tests/integration/test_hgnc_api.py -v -m integration         # 7 tests ✅
 uv run pytest tests/integration/test_uniprot_api.py -v -m integration      # 12 tests ✅
-uv run pytest tests/integration/test_chembl_api.py -v -m integration       # 50+ tests ✅
+uv run pytest tests/integration/test_chembl_api.py -v -m integration       # 20 tests ✅
 uv run pytest tests/integration/test_opentargets_api.py -v -m integration  # 9 tests ✅
 uv run pytest tests/integration/test_drugbank_api.py -v -m integration     # 7 tests (⛔ skipped without API key)
-uv run pytest tests/integration/test_string_api.py -v -m integration       # 12 tests ✅
+uv run pytest tests/integration/test_string_api.py -v -m integration       # 11 tests ✅
 uv run pytest tests/integration/test_biogrid_api.py -v -m integration      # 11 tests ✅
 uv run pytest tests/integration/test_iuphar_api.py -v -m integration       # 48 tests ✅
 uv run pytest tests/integration/test_pubchem_api.py -v -m integration      # 19 tests ✅
 uv run pytest tests/integration/test_ensembl_api.py -v -m integration      # 24 tests ✅
 uv run pytest tests/integration/test_entrez_api.py -v -m integration       # 20 tests ✅
-uv run pytest tests/integration/test_wikipathways_api.py -v -m integration # Integration tests ✅
+uv run pytest tests/integration/test_wikipathways_api.py -v -m integration # 17 tests ✅
 uv run pytest tests/unit/test_clinicaltrials_client.py -v                  # 13 unit tests ✅
 ```
 
 ## Example Usage
 
-### HGNC Server (Gene Nomenclature)
+All 12 servers follow the **Fuzzy-to-Fact** pattern: fuzzy search → get candidate → strict lookup with cross-references.
+
+### Basic Pattern (HGNC)
 
 ```python
 from lifesciences_mcp.clients import HGNCClient
 
 async with HGNCClient() as client:
-    # Fuzzy search for genes
+    # Phase 1: Fuzzy search
     results = await client.search_genes("BRCA")
     # Returns: PaginationEnvelope[SearchCandidate]
 
-    # Strict lookup by HGNC CURIE
+    # Phase 2: Strict lookup by CURIE
     gene = await client.get_gene("HGNC:1100")  # BRCA1
     # Returns: Gene with cross_references to UniProt, Ensembl, OMIM, etc.
 ```
 
-### UniProt Server (Protein Search & Lookup)
-
-```python
-from lifesciences_mcp.clients import UniProtClient
-
-async with UniProtClient() as client:
-    # Phase 1: Fuzzy search for proteins
-    results = await client.search_proteins("p53 tumor suppressor", page_size=10)
-    # Returns: PaginationEnvelope[ProteinSearchCandidate]
-
-    # Get top candidate
-    top_candidate = results.items[0]
-    print(f"{top_candidate.id}: {top_candidate.name} ({top_candidate.organism})")
-    # Output: UniProtKB:P04637: Cellular tumor antigen p53 (Homo sapiens)
-
-    # Phase 2: Strict lookup with complete protein record
-    protein = await client.get_protein(top_candidate.id)
-    # Returns: Protein with cross_references to HGNC, Ensembl, RefSeq, PDB, OMIM, etc.
-    print(f"Function: {protein.function[:100]}...")
-    print(f"Cross-refs: HGNC:{protein.cross_references.hgnc}, Ensembl:{protein.cross_references.ensembl_transcript}")
-```
-
-### PubChem Server (Chemical Compound Search & Lookup)
-
-```python
-from lifesciences_mcp.clients import PubChemClient
-
-async with PubChemClient() as client:
-    # Phase 1: Fuzzy search for compounds
-    results = await client.search_compounds("aspirin", page_size=10)
-    # Returns: PaginationEnvelope[PubChemSearchCandidate]
-
-    # Get top candidate
-    top_candidate = results.items[0]
-    print(f"{top_candidate.id}: {top_candidate.name} ({top_candidate.molecular_formula})")
-    # Output: PubChem:CID2244: Aspirin (C9H8O4)
-
-    # Phase 2: Strict lookup with complete compound record
-    compound = await client.get_compound(top_candidate.id)
-    # Returns: PubChemCompound with SMILES, InChI, cross_references
-    print(f"SMILES: {compound.canonical_smiles}")
-    print(f"InChI: {compound.inchi[:50]}...")
-    print(f"Cross-refs: ChEMBL:{compound.cross_references.get('chembl')}, DrugBank:{compound.cross_references.get('drugbank')}")
-
-    # Token-efficient slim mode
-    compound_slim = await client.get_compound("PubChem:CID2244", slim=True)
-    # Returns only: id, name, molecular_formula (~20 tokens vs ~115-300)
-```
-
-### WikiPathways Server (Biological Pathways)
-
-```python
-from lifesciences_mcp.clients import WikiPathwaysClient
-
-async with WikiPathwaysClient() as client:
-    # Phase 1: Search for pathways
-    results = await client.search_pathways("EGFR signaling", species="Homo sapiens")
-    print(f"Found {len(results.items)} pathways")
-
-    # Get pathway details
-    pathway = await client.get_pathway(results.items[0].id)
-    print(f"Pathway: {pathway.name}")
-    print(f"Components: {pathway.component_counts.genes} genes, {pathway.component_counts.metabolites} metabolites")
-
-    # Find pathways for a specific gene
-    gene_pathways = await client.get_pathways_for_gene("EGFR", species="Homo sapiens")
-    print(f"EGFR appears in {len(gene_pathways.items)} pathways")
-
-    # Get pathway components (graph structure)
-    components = await client.get_pathway_components(pathway.id)
-    print(f"Data nodes: {len(components.data_nodes)}")
-    print(f"Interactions: {len(components.interactions)}")
-```
-
-### ClinicalTrials.gov Server (Clinical Trials)
+### Advanced Pattern (ClinicalTrials.gov)
 
 ```python
 from lifesciences_mcp.clients import ClinicalTrialsClient
 
 async with ClinicalTrialsClient() as client:
-    # Phase 1: Search clinical trials
+    # Phase 1: Multi-filter search
     results = await client.search_trials(
         query="cancer immunotherapy",
         condition="lung cancer",
@@ -324,53 +251,42 @@ async with ClinicalTrialsClient() as client:
         status="RECRUITING"
     )
 
-    # Get trial details
+    # Phase 2: Get trial details
     trial = await client.get_trial(results.items[0].id)
-    print(f"Trial: {trial.title}")
-    print(f"Phase: {trial.phase}")
-    print(f"Status: {trial.status}")
-    print(f"Enrollment: {trial.enrollment}")
+    print(f"Trial: {trial.title}, Phase: {trial.phase}, Enrollment: {trial.enrollment}")
 
-    # Get trial locations
+    # Phase 3: Get trial locations
     locations = await client.get_trial_locations(trial.id)
-    print(f"Trial sites: {len(locations)}")
     for loc in locations[:3]:
         print(f"  - {loc.facility_name}, {loc.city}, {loc.state}")
 ```
 
 ### MCP Tool Interface
 
-All servers expose their functionality as MCP tools:
+All servers expose functionality as MCP tools:
 
 ```python
-# HGNC tools
-await mcp.call_tool("search_genes", {"query": "BRCA", "page_size": 5})
-await mcp.call_tool("get_gene", {"hgnc_id": "HGNC:1100"})
+# Gene lookup (HGNC, Ensembl, Entrez)
+await mcp.call_tool("hgnc_search_genes", {"query": "BRCA", "page_size": 5})
+await mcp.call_tool("hgnc_get_gene", {"hgnc_id": "HGNC:1100"})
 
-# UniProt tools
-await mcp.call_tool("search_proteins", {"query": "insulin", "page_size": 10})
-await mcp.call_tool("get_protein", {"uniprot_id": "UniProtKB:P04637", "slim": False})
+# Protein lookup (UniProt, STRING, BioGRID)
+await mcp.call_tool("uniprot_search_proteins", {"query": "insulin", "page_size": 10})
+await mcp.call_tool("uniprot_get_protein", {"uniprot_id": "UniProtKB:P04637"})
 
-# PubChem tools
-await mcp.call_tool("search_compounds", {"query": "aspirin", "page_size": 10})
-await mcp.call_tool("get_compound", {"pubchem_id": "PubChem:CID2244", "slim": False})
+# Compound lookup (ChEMBL, PubChem)
+await mcp.call_tool("chembl_search_compounds", {"query": "aspirin"})
+await mcp.call_tool("pubchem_get_compound", {"pubchem_id": "PubChem:CID2244"})
 
-# WikiPathways tools
-await mcp.call_tool("search_pathways", {"query": "EGFR signaling", "species": "Homo sapiens"})
-await mcp.call_tool("get_pathway", {"pathway_id": "WP:WP4868"})
-await mcp.call_tool("get_pathways_for_gene", {"gene_symbol": "EGFR", "species": "Homo sapiens"})
-await mcp.call_tool("get_pathway_components", {"pathway_id": "WP:WP4868"})
-
-# ClinicalTrials.gov tools
-await mcp.call_tool("search_trials", {
+# Clinical trials
+await mcp.call_tool("clinicaltrials_search_trials", {
     "query": "cancer immunotherapy",
-    "condition": "lung cancer",
     "phase": "PHASE3",
     "status": "RECRUITING"
 })
-await mcp.call_tool("get_trial", {"nct_id": "NCT:00461032"})
-await mcp.call_tool("get_trial_locations", {"nct_id": "NCT:00461032"})
 ```
+
+> **For complete examples of all 12 servers**, see [API Reference](architecture/docs/04_api_reference.md).
 
 ---
 
@@ -533,6 +449,7 @@ We use these tools to perform real-world analysis. All outputs are validated for
 - [ADR-001 v1.3](docs/adr/accepted/adr-001-v1.3.md) - Binding architecture specification (Fuzzy-to-Fact protocol)
 - [Component Inventory](architecture/docs/01_component_inventory.md) - Detailed component reference
 - [API Reference](architecture/docs/04_api_reference.md) - Usage guide with examples
+- [Competency Questions Catalog](docs/competency-questions-catalog.md) - Research questions for knowledge graph building with the lifesciences-graph-builder skill
 
 ---
 

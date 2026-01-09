@@ -7,18 +7,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 FastMCP wrappers for essential life sciences APIs, enabling LLM agents to query biological databases for drug discovery and repurposing.
 
 **Status:**
-- HGNC server v0.1.0 - ✅ Complete (21 tests passing)
-- UniProt server v0.1.0 - ✅ Complete (29 tests passing, all 4 User Stories)
-- ChEMBL server v0.1.0 - ✅ Complete (112 tests, PR #10 merged)
+- HGNC server v0.1.0 - ✅ Complete (7 integration tests passing)
+- UniProt server v0.1.0 - ✅ Complete (12 integration tests passing, all 4 User Stories)
+- ChEMBL server v0.1.0 - ✅ Complete (62 tests: 20 integration + 42 unit, PR #10 merged)
 - Open Targets server v0.1.0 - ✅ Complete (9 tests, PR #11 merged)
 - DrugBank server v0.1.0 - ⛔ **BLOCKED** (33 unit tests, PR #12 open - API key required)
-- STRING server v0.1.0 - ✅ Complete (3 tools, integration tests passing)
+- STRING server v0.1.0 - ✅ Complete (3 tools, 11 integration tests passing)
 - BioGRID server v0.1.0 - ✅ Complete (11 integration tests passing, all 4 User Stories)
 - Ensembl server v0.1.0 - ✅ Complete (86 tests: 62 unit + 24 integration)
 - Entrez server v0.1.0 - ✅ Complete (58 tests: 38 unit + 20 integration)
-- PubChem server v0.1.0 - ✅ Complete (100 tests: 81 unit + 19 integration)
+- PubChem server v0.1.0 - ✅ Complete (85 tests: 66 unit + 19 integration)
 - IUPHAR/GtoPdb server v0.1.0 - ✅ Complete (59 tests: 48 integration + 11 unit, all 5 User Stories)
-- WikiPathways server v0.1.0 - ✅ Complete (4 tools: search_pathways, get_pathway, get_pathways_for_gene, get_pathway_components)
+- WikiPathways server v0.1.0 - ✅ Complete (4 tools, 17 integration tests passing)
 - ClinicalTrials.gov server v0.1.0 - ✅ Complete (3 tools, 13 unit tests passing | Manual curl testing required due to Cloudflare blocking)
 
 **Platform Skills:**
@@ -34,6 +34,7 @@ FastMCP wrappers for essential life sciences APIs, enabling LLM agents to query 
 | Document | Purpose |
 |----------|---------|
 | `docs/platform-engineering-rationale.md` | **Start here** - WHY we use Platform Engineering for agents |
+| `docs/competency-questions-catalog.md` | Research questions catalog for knowledge graph building |
 | `docs/adr/accepted/adr-001-v1.2.md` | Binding architecture specification |
 | `docs/adr/accepted/adr-002-v1.0.md` | ADR-002: Project Skills (the "Hardware") |
 | `docs/adr/accepted/adr-003-v1.0.md` | ADR-003: SpecKit SDLC (the "Operating System") |
@@ -174,7 +175,8 @@ src/lifesciences_mcp/
 ├── models/
 │   ├── __init__.py      # Model exports
 │   ├── envelopes.py     # PaginationEnvelope, ErrorEnvelope
-│   ├── gene.py          # Gene, SearchCandidate, CrossReferences
+│   ├── cross_references.py # CrossReferences (shared cross-reference schema)
+│   ├── gene.py          # Gene, SearchCandidate
 │   ├── protein.py       # Protein, ProteinSearchCandidate
 │   ├── compound.py      # Compound, CompoundSearchCandidate
 │   ├── target.py        # Target, TargetSearchCandidate, Association
@@ -183,11 +185,13 @@ src/lifesciences_mcp/
 │   ├── biogrid.py       # GeneticInteraction, InteractionResult, BioGridSearchCandidate
 │   ├── ensembl.py       # EnsemblGene, EnsemblTranscript, GeneSearchCandidate
 │   ├── entrez.py        # EntrezGene, GeneSearchCandidate, EntrezCrossReferences
-│   ├── pubchem.py       # PubChemCompound, CompoundSearchCandidate
-│   ├── iuphar.py        # Ligand, Target, LigandSearchCandidate, TargetSearchCandidate
+│   ├── pubchem_compound.py # PubChemCompound, PubChemSearchCandidate
+│   ├── pharmacology.py  # Ligand, Target, LigandSearchCandidate, TargetSearchCandidate (IUPHAR/GtoPdb)
 │   ├── pathway.py       # Pathway, PathwaySearchCandidate, RevisionMetadata, ComponentCounts
 │   ├── pathway_components.py # PathwayComponents, DataNode, Interaction
-│   └── clinicaltrials.py # Trial, TrialSearchCandidate, TrialLocation
+│   ├── provenance.py    # Provenance tracking models
+│   ├── trial.py         # Trial, TrialSearchCandidate, TrialProtocol, EligibilityCriteria
+│   └── trial_location.py # TrialLocation
 └── servers/
     ├── hgnc.py          # HGNC MCP server (search_genes, get_gene)
     ├── uniprot.py       # UniProt MCP server (search_proteins, get_protein)
