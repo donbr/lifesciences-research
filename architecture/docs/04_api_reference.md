@@ -2,2184 +2,1597 @@
 
 ## Overview
 
-This API reference documents all public APIs in the Life Sciences MCP (Model Context Protocol) project. The project provides a unified gateway to 13+ biological databases through a consistent Fuzzy-to-Fact protocol.
+The Life Sciences MCP provides unified access to 13 major life sciences databases through a standardized FastMCP-based API. This reference documents all public client classes, model classes, MCP server tools, and configuration options.
 
-**Main Components:**
-- **Client APIs**: Async HTTP clients for each biological database (HGNC, UniProt, Ensembl, ChEMBL, etc.)
-- **Data Models**: Pydantic models for biological entities (genes, proteins, compounds, etc.)
-- **Server APIs**: MCP servers exposing tools for LLM integration
-- **Gateway Server**: Unified server composing all individual MCP servers
-- **Orchestration APIs**: High-level search and aggregation utilities
+**Key Features:**
+- **Fuzzy-to-Fact Protocol**: Two-phase resolution (search → get) for all entity types
+- **Cross-Database Navigation**: 22-key registry enables seamless data integration
+- **Rate Limiting**: Client-side enforcement prevents upstream API throttling
+- **Connection Pooling**: Persistent HTTP connections for performance
+- **Token Efficiency**: Slim mode reduces token usage by ~80%
+- **Error Recovery**: Canonical error envelopes with agent-actionable hints
 
-**Organization:**
-- All client code: `src/lifesciences_mcp/clients/`
-- All models: `src/lifesciences_mcp/models/`
-- All servers: `src/lifesciences_mcp/servers/`
-- Orchestration: `src/lifesciences_agent/`
-
----
-
-## Client APIs
-
-All clients implement the Fuzzy-to-Fact protocol with two-phase operations:
-1. **Phase 1 (Fuzzy Search)**: `search_*()` methods return ranked candidates
-2. **Phase 2 (Fact Retrieval)**: `get_*()` methods return complete records with CURIEs
-
-### LifeSciencesClient (Base Class)
-
-**File**: `src/lifesciences_mcp/clients/base.py`
-
-#### Description
-Base async HTTP client for all life sciences APIs. Provides connection pooling, session management, and common HTTP functionality.
-
-#### Constructor
-```python
-def __init__(
-    self,
-    base_url: str,
-    timeout: float = 30.0,
-    max_connections: int = 10,
-) -> None
-```
-
-**Parameters:**
-- `base_url` (str): Base URL for the API endpoint
-- `timeout` (float): Request timeout in seconds (default: 30.0)
-- `max_connections` (int): Maximum concurrent connections (default: 10)
-
-**Example:**
-```python
-from lifesciences_mcp.clients.base import LifeSciencesClient
-
-# Create a custom client
-client = LifeSciencesClient(
-    base_url="https://api.example.com",
-    timeout=60.0,
-    max_connections=20
-)
-```
-
-#### Methods
-
-##### close()
-```python
-async def close(self) -> None
-```
-
-Close the HTTP client and cleanup resources.
-
-**Example:**
-```python
-await client.close()
-```
-
-**Best Practices:**
-- Always close clients when done to avoid resource leaks
-- Use clients as async context managers for automatic cleanup
-- Subclasses should call `super().close()` in their cleanup methods
+**Deployment:**
+- **Gateway Endpoint**: `https://lifesciences-research.fastmcp.app/mcp`
+- **Protocol**: JSON-RPC 2.0 over HTTP/SSE
+- **Python Package**: `lifesciences_mcp` (version 0.1.0)
 
 ---
 
-### HGNCClient
+## Table of Contents
 
-**File**: `src/lifesciences_mcp/clients/hgnc.py`
+- [Quick Start](#quick-start)
+- [Client Classes](#client-classes)
+- [Model Classes](#model-classes)
+- [MCP Server Tools](#mcp-server-tools)
+- [Configuration](#configuration)
+- [Usage Patterns](#usage-patterns)
+- [Best Practices](#best-practices)
+- [Appendices](#appendices)
 
-#### Description
-HGNC (HUGO Gene Nomenclature Committee) REST API client implementing the Fuzzy-to-Fact protocol for gene symbol resolution. Provides authoritative gene nomenclature with cross-references to 22 external databases.
+---
 
-**Features:**
-- Rate limiting at 10 requests/second (HGNC requirement)
-- Exponential backoff with thundering herd prevention
-- Alias boosting (e.g., "p53" → "TP53")
-- Context manager support for automatic cleanup
+## Quick Start
 
-#### Constructor
-```python
-def __init__(self) -> None
+### Installation
+
+```bash
+pip install lifesciences-mcp
 ```
 
-**Example:**
+### Basic Usage (Python Client)
+
 ```python
-from lifesciences_mcp.clients import HGNCClient
+from lifesciences_mcp import HGNCClient, ErrorEnvelope
 
-# Standard usage
-client = HGNCClient()
-
-# Context manager (recommended)
+# Context manager handles connection lifecycle
 async with HGNCClient() as client:
-    result = await client.search_genes("BRCA1")
+    # Phase 1: Fuzzy search
+    result = await client.search_genes("BRCA1", page_size=10)
+
+    if isinstance(result, ErrorEnvelope):
+        print(f"Error: {result.error.message}")
+        return
+
+    # Get top candidate
+    top_gene = result.items[0]
+    print(f"Found: {top_gene.symbol} (score: {top_gene.score})")
+
+    # Phase 2: Strict lookup
+    gene = await client.get_gene(top_gene.id)
+    if not isinstance(gene, ErrorEnvelope):
+        print(f"Location: {gene.location}")
+        print(f"UniProt IDs: {gene.cross_references.uniprot}")
 ```
 
-#### Methods
+### MCP Tool Usage (JSON-RPC)
 
-##### search_genes()
+```json
+// Request
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "hgnc_search_genes",
+    "arguments": {
+      "query": "BRCA1",
+      "page_size": 10
+    }
+  }
+}
+
+// Response
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "content": [{
+      "type": "text",
+      "text": "{\"items\": [...], \"pagination\": {...}}"
+    }]
+  }
+}
+```
+
+---
+
+## Client Classes
+
+All clients inherit from `LifeSciencesClient` base class and implement the Fuzzy-to-Fact protocol with two core operations:
+1. **`search_*(query, ...)`**: Fuzzy search returning ranked candidates with pagination
+2. **`get_*(id)`**: Strict lookup by validated CURIE identifier
+
+### Base Client
+
+#### `LifeSciencesClient`
+
+**Location**: `src/lifesciences_mcp/clients/base.py`
+
+Base async HTTP client providing shared functionality for all API clients.
+
+**Key Features:**
+- Async httpx client with connection pooling (max 10 connections)
+- Granular timeout configuration (connect: 5s, read: 30s, write: 10s, pool: 5s)
+- Standard Accept header for JSON responses
+- Context manager support for lifecycle management
+
+**Constructor:**
 ```python
-async def search_genes(
-    self,
-    query: str,
-    slim: bool = False,
-    cursor: str | None = None,
-    page_size: int = 50,
-) -> PaginationEnvelope[SearchCandidate] | ErrorEnvelope
+__init__(base_url: str, timeout: float = 30.0, max_connections: int = 10)
 ```
 
-Fuzzy search for genes (Phase 1 of Fuzzy-to-Fact). Searches gene symbols, names, and aliases with intelligent ranking.
+**Methods:**
+- `async _get_client() -> httpx.AsyncClient` - Get or create HTTP client
+- `async close() -> None` - Close HTTP client and release connections
+- `async _get(path: str, **kwargs) -> httpx.Response` - Make GET request
+
+---
+
+### HGNC Client
+
+#### `HGNCClient`
+
+**Location**: `src/lifesciences_mcp/clients/hgnc.py`
+
+HGNC Gene Nomenclature Committee API client for gene symbol resolution.
+
+**Base URL**: `https://rest.genenames.org`
+**Rate Limit**: 10 requests/second (100ms delay)
+**Inherits From**: `LifeSciencesClient`
+
+**Methods:**
+
+##### `search_genes(query, slim=False, cursor=None, page_size=50)`
+
+Fuzzy search for human genes (Phase 1 of Fuzzy-to-Fact).
 
 **Parameters:**
-- `query` (str): Search term (minimum 2 characters). Can be gene symbol, name, alias, or natural language
-- `slim` (bool): If True, return minimal fields (~20 tokens per entity). Default: False
-- `cursor` (str | None): Opaque pagination cursor from previous response
+- `query` (str): Gene symbol, name, alias, or natural language query (min 2 chars)
+- `slim` (bool): Return minimal fields for token efficiency (default: False)
+- `cursor` (str | None): Opaque cursor for pagination
 - `page_size` (int): Results per page (1-100, default: 50)
 
-**Returns:**
-- `PaginationEnvelope[SearchCandidate]`: Paginated search results with ranked candidates
-- `ErrorEnvelope`: On validation errors, rate limiting, or upstream failures
+**Returns**: `PaginationEnvelope[SearchCandidate] | ErrorEnvelope`
+
+**Search Strategy:**
+1. Searches alias_symbol field for exact alias matches (boosted to score=1.0)
+2. Searches general endpoint for symbol/name matches
+3. Merges results with exact symbol matches prioritized
+
+**Scoring:**
+- Exact symbol match: 1.0
+- Alias match: 1.0
+- Position-based decay: 0.95 - (position * 0.05)
+
+##### `get_gene(hgnc_id)`
+
+Get complete gene record by HGNC CURIE (Phase 2 of Fuzzy-to-Fact).
+
+**Parameters:**
+- `hgnc_id` (str): HGNC CURIE in format `HGNC:NNNNN` (e.g., `HGNC:1100`)
+
+**Returns**: `Gene | ErrorEnvelope`
+
+**Validation**: Enforces CURIE format before API call
 
 **Example:**
+
 ```python
-from lifesciences_mcp.clients import HGNCClient
+from lifesciences_mcp import HGNCClient
 
 async with HGNCClient() as client:
-    # Basic search
-    result = await client.search_genes("BRCA1")
+    # Fuzzy search
+    results = await client.search_genes("breast cancer 1", page_size=5)
 
-    if result.items:
-        print(f"Found {len(result.items)} candidates")
-        for candidate in result.items:
-            print(f"  {candidate.symbol}: {candidate.name} (score: {candidate.score})")
+    if not isinstance(results, ErrorEnvelope):
+        top_hit = results.items[0]  # Highest score
+        print(f"Top match: {top_hit.symbol} (score: {top_hit.score})")
 
-    # Pagination
-    if result.pagination.cursor:
-        next_page = await client.search_genes(
-            "BRCA1",
-            cursor=result.pagination.cursor
-        )
-
-    # Slim mode for token efficiency
-    slim_result = await client.search_genes("TP53", slim=True)
+        # Strict lookup
+        gene = await client.get_gene(top_hit.id)
+        if not isinstance(gene, ErrorEnvelope):
+            print(f"Official name: {gene.name}")
+            print(f"Location: {gene.location}")
+            print(f"Ensembl ID: {gene.cross_references.ensembl_gene}")
 ```
 
-**Search Behavior:**
-- Searches multiple HGNC fields: symbol, name, aliases, previous symbols
-- Alias matches get perfect score (1.0) and appear first
-- Exact symbol matches get perfect score (1.0)
-- General matches use position-based scoring (0.95 - 0.05 * position)
-- Minimum query length: 2 characters
-- Returns AMBIGUOUS_QUERY error if >100 results and query <3 chars
-
-**Best Practices:**
-- Use specific queries (gene symbols) for best results
-- Check `score` field to assess match quality
-- Handle `ErrorEnvelope` responses for error recovery
-- Use pagination for large result sets
-- Use slim mode when processing many candidates
-
-##### get_gene()
-```python
-async def get_gene(self, hgnc_id: str) -> Gene | ErrorEnvelope
-```
-
-Get complete gene record by HGNC CURIE (Phase 2 of Fuzzy-to-Fact). Returns full entity with cross-references to external databases.
-
-**Parameters:**
-- `hgnc_id` (str): HGNC CURIE in format 'HGNC:NNNNN' (e.g., 'HGNC:1100')
-
-**Returns:**
-- `Gene`: Complete gene record with all fields and cross-references
-- `ErrorEnvelope`: On invalid CURIE format, not found, or upstream errors
-
-**Example:**
-```python
-from lifesciences_mcp.clients import HGNCClient
-
-async with HGNCClient() as client:
-    # Get gene by CURIE
-    gene = await client.get_gene("HGNC:1100")
-
-    if isinstance(gene, Gene):
-        print(f"Symbol: {gene.symbol}")
-        print(f"Name: {gene.name}")
-        print(f"Location: {gene.location}")
-
-        # Access cross-references
-        if gene.cross_references.ensembl_gene:
-            print(f"Ensembl: {gene.cross_references.ensembl_gene}")
-        if gene.cross_references.uniprot:
-            print(f"UniProt: {', '.join(gene.cross_references.uniprot)}")
-    else:
-        # Handle error
-        print(f"Error: {gene.error.message}")
-        print(f"Recovery hint: {gene.error.recovery_hint}")
-```
-
-**Error Codes:**
-- `UNRESOLVED_ENTITY`: Invalid CURIE format (not matching `HGNC:\d+`)
-- `ENTITY_NOT_FOUND`: Valid CURIE but gene not found in HGNC
-- `RATE_LIMITED`: Too many requests (429 response)
-- `UPSTREAM_ERROR`: HGNC API failure (5xx errors)
-
-**Best Practices:**
-- Always validate CURIE format from search results
-- Use search_genes first to resolve ambiguous identifiers
-- Check cross_references for database linkage
-- Handle all error codes with appropriate recovery actions
+**See Also**: [Gene model](#gene-models), [hgnc_search_genes tool](#hgnc-tools)
 
 ---
 
-### UniProtClient
+### UniProt Client
 
-**File**: `src/lifesciences_mcp/clients/uniprot.py`
+#### `UniProtClient`
 
-#### Description
-UniProt REST API client for protein search and retrieval. Implements Fuzzy-to-Fact protocol with rate limiting and exponential backoff.
+**Location**: `src/lifesciences_mcp/clients/uniprot.py`
 
-**Features:**
-- Rate limiting at 10 requests/second
-- Context manager support
-- Cross-reference mapping to 22-key registry
-- Slim mode for token budgeting
+UniProt protein database client for protein sequences and annotations.
 
-#### Constructor
-```python
-def __init__(self) -> None
-```
+**Base URL**: `https://rest.uniprot.org`
+**Rate Limit**: 10 requests/second
+**Inherits From**: `LifeSciencesClient`
 
-**Example:**
-```python
-from lifesciences_mcp.clients import UniProtClient
+**Methods:**
 
-async with UniProtClient() as client:
-    result = await client.search_proteins("p53")
-```
+##### `search_proteins(query, organism=None, slim=False, cursor=None, page_size=50)`
 
-#### Methods
-
-##### search_proteins()
-```python
-async def search_proteins(
-    self,
-    query: str,
-    slim: bool = False,
-    cursor: str | None = None,
-    page_size: int = 50,
-) -> PaginationEnvelope[ProteinSearchCandidate] | ErrorEnvelope
-```
-
-Fuzzy search for proteins (Phase 1 of Fuzzy-to-Fact).
+Fuzzy search for proteins with optional organism filtering.
 
 **Parameters:**
-- `query` (str): Search term (protein name, accession, gene, organism). Minimum 2 characters
-- `slim` (bool): Return minimal fields. Default: False
-- `cursor` (str | None): Server-provided pagination cursor
-- `page_size` (int): Results per page (1-500, default: 50)
-
-**Returns:**
-- `PaginationEnvelope[ProteinSearchCandidate]`: Paginated search results
-- `ErrorEnvelope`: On errors
-
-**Example:**
-```python
-async with UniProtClient() as client:
-    # Search for p53 protein
-    result = await client.search_proteins("p53")
-
-    for candidate in result.items:
-        print(f"{candidate.id}: {candidate.name}")
-        print(f"  Organism: {candidate.organism}")
-        print(f"  Genes: {', '.join(candidate.gene_names or [])}")
-        print(f"  Score: {candidate.score}")
-
-    # Search by organism
-    result = await client.search_proteins("p53 AND organism_name:human")
-
-    # Pagination using server cursor
-    if result.pagination.cursor:
-        next_page = await client.search_proteins(
-            "p53",
-            cursor=result.pagination.cursor
-        )
-```
-
-**Best Practices:**
-- Use specific queries (accessions, gene symbols) for best results
-- UniProt search supports advanced query syntax (AND, OR, field:value)
-- Check organism field to disambiguate proteins
-- Server-side cursors expire after inactivity
-
-##### get_protein()
-```python
-async def get_protein(
-    self,
-    uniprot_id: str,
-    slim: bool = False
-) -> Protein | ErrorEnvelope
-```
-
-Get complete protein record by UniProt CURIE (Phase 2 of Fuzzy-to-Fact).
-
-**Parameters:**
-- `uniprot_id` (str): UniProt CURIE in format 'UniProtKB:XXXXXX' (e.g., 'UniProtKB:P04637')
-- `slim` (bool): Return minimal fields (id, name, organism only)
-
-**Returns:**
-- `Protein`: Complete protein record
-- `ErrorEnvelope`: On errors
-
-**Example:**
-```python
-async with UniProtClient() as client:
-    # Get protein by CURIE
-    protein = await client.get_protein("UniProtKB:P04637")
-
-    if isinstance(protein, Protein):
-        print(f"Name: {protein.name}")
-        print(f"Function: {protein.function}")
-        print(f"Length: {protein.sequence_length} amino acids")
-
-        # Cross-references
-        if protein.cross_references.hgnc:
-            print(f"Gene: {protein.cross_references.hgnc}")
-        if protein.cross_references.pdb:
-            print(f"Structures: {', '.join(protein.cross_references.pdb[:5])}")
-
-    # Slim mode
-    slim_protein = await client.get_protein("UniProtKB:P04637", slim=True)
-```
-
-**CURIE Format:**
-- Pattern: `^UniProtKB:[A-Z][A-Z0-9]{5,9}$`
-- Examples: `UniProtKB:P04637` (Swiss-Prot), `UniProtKB:A0A123B4C5` (TrEMBL)
-- Must start with uppercase letter, followed by 5-9 alphanumeric chars
-
-**Best Practices:**
-- Use search_proteins to resolve names to CURIEs
-- Check cross_references for gene and structure linkage
-- Slim mode reduces tokens from ~300 to ~20
-
----
-
-### EnsemblClient
-
-**File**: `src/lifesciences_mcp/clients/ensembl.py`
-
-#### Description
-Ensembl REST API client for gene and transcript data. Supports multi-species queries with intelligent species normalization.
-
-**Features:**
-- Rate limiting at 15 requests/second (Ensembl limit)
-- Species aliasing ("human" → "homo_sapiens")
-- Transcript expansion for gene records
-- Cross-reference mapping
-
-#### Constructor
-```python
-def __init__(self) -> None
-```
-
-**Example:**
-```python
-from lifesciences_mcp.clients import EnsemblClient
-
-async with EnsemblClient() as client:
-    result = await client.search_genes("BRCA1", species="human")
-```
-
-#### Methods
-
-##### search_genes()
-```python
-async def search_genes(
-    self,
-    query: str,
-    species: str = "homo_sapiens",
-    page_size: int = 50,
-    cursor: str | None = None,
-    slim: bool = False,
-) -> PaginationEnvelope[GeneSearchCandidate] | ErrorEnvelope
-```
-
-Fuzzy search for genes with species filtering.
-
-**Parameters:**
-- `query` (str): Gene symbol or name (minimum 2 characters)
-- `species` (str): Species name or alias (default: "homo_sapiens")
-- `page_size` (int): Results per page (1-100)
-- `cursor` (str | None): Pagination cursor
-- `slim` (bool): Minimal fields (included for API consistency)
-
-**Returns:**
-- `PaginationEnvelope[GeneSearchCandidate]`: Search results
-- `ErrorEnvelope`: On errors
-
-**Example:**
-```python
-async with EnsemblClient() as client:
-    # Human genes
-    result = await client.search_genes("TP53", species="human")
-
-    # Mouse genes with species alias
-    result = await client.search_genes("Brca1", species="mouse")
-
-    # Full species name
-    result = await client.search_genes("brca1", species="mus_musculus")
-
-    for candidate in result.items:
-        print(f"{candidate.symbol} ({candidate.id})")
-        print(f"  {candidate.name}")
-        print(f"  Biotype: {candidate.biotype}")
-```
-
-**Species Aliases:**
-- `human` → `homo_sapiens`
-- `mouse` → `mus_musculus`
-- `rat` → `rattus_norvegicus`
-- `zebrafish` → `danio_rerio`
-- `fly` → `drosophila_melanogaster`
-- `worm` → `caenorhabditis_elegans`
-- `yeast` → `saccharomyces_cerevisiae`
-
-**Best Practices:**
-- Use common species aliases for convenience
-- Check biotype field to filter protein-coding genes
-- Symbol capitalization varies by species (TP53 for human, Tp53 for mouse)
-
-##### get_gene()
-```python
-async def get_gene(
-    self,
-    ensembl_id: str,
-    slim: bool = False
-) -> EnsemblGene | ErrorEnvelope
-```
-
-Get complete gene record by Ensembl Gene ID.
-
-**Parameters:**
-- `ensembl_id` (str): Ensembl Gene ID in format 'ENSG + 11 digits' (e.g., 'ENSG00000141510')
-- `slim` (bool): Omit cross_references to reduce token count
-
-**Returns:**
-- `EnsemblGene`: Complete gene record
-- `ErrorEnvelope`: On errors
-
-**Example:**
-```python
-async with EnsemblClient() as client:
-    gene = await client.get_gene("ENSG00000141510")
-
-    if isinstance(gene, EnsemblGene):
-        print(f"Symbol: {gene.symbol}")
-        print(f"Location: {gene.chromosome}:{gene.start}-{gene.end}")
-        print(f"Assembly: {gene.assembly_name}")
-
-        # Transcript list
-        if gene.transcripts:
-            print(f"Transcripts: {len(gene.transcripts)}")
-            for transcript_id in gene.transcripts[:5]:
-                print(f"  {transcript_id}")
-
-        # Cross-references
-        if gene.cross_references.hgnc:
-            print(f"HGNC: {gene.cross_references.hgnc}")
-```
-
-**ID Format:**
-- Pattern: `^ENSG\d{11}$`
-- Example: `ENSG00000141510` (TP53)
-- Version numbers (`.12`) are automatically stripped
-
-**Best Practices:**
-- Use search_genes to find valid Ensembl IDs
-- Access transcripts list for alternative splicing analysis
-- Check strand field for gene orientation (+1 or -1)
-
-##### get_transcript()
-```python
-async def get_transcript(
-    self,
-    transcript_id: str,
-    slim: bool = False
-) -> EnsemblTranscript | ErrorEnvelope
-```
-
-Get transcript record by Ensembl Transcript ID.
-
-**Parameters:**
-- `transcript_id` (str): Ensembl Transcript ID in format 'ENST + 11 digits'
-- `slim` (bool): Omit cross_references
-
-**Returns:**
-- `EnsemblTranscript`: Transcript record
-- `ErrorEnvelope`: On errors
-
-**Example:**
-```python
-async with EnsemblClient() as client:
-    transcript = await client.get_transcript("ENST00000269305")
-
-    if isinstance(transcript, EnsemblTranscript):
-        print(f"Display name: {transcript.display_name}")
-        print(f"Parent gene: {transcript.parent_gene}")
-        print(f"Canonical: {transcript.is_canonical}")
-        print(f"Biotype: {transcript.biotype}")
-```
-
-**Best Practices:**
-- Get transcript IDs from gene.transcripts list
-- Check is_canonical to identify primary isoform
-- Use parent_gene to navigate back to gene record
-
----
-
-### ChEMBLClient
-
-**File**: `src/lifesciences_mcp/clients/chembl.py`
-
-#### Description
-ChEMBL API client for compound and bioactivity data. Uses synchronous SDK wrapped with async executor.
-
-**Features:**
-- Rate limiting at 10 requests/second
-- Batch compound lookup (up to 100 compounds)
-- Indication data (approved therapeutic uses)
-- Cross-reference mapping
-
-#### Constructor
-```python
-def __init__(self) -> None
-```
-
-**Example:**
-```python
-from lifesciences_mcp.clients import ChEMBLClient
-
-client = ChEMBLClient()
-try:
-    result = await client.search_compounds("aspirin")
-finally:
-    await client.close()
-```
-
-#### Methods
-
-##### search_compounds()
-```python
-async def search_compounds(
-    self,
-    query: str,
-    slim: bool = False,
-    cursor: str | None = None,
-    page_size: int = 50,
-) -> PaginationEnvelope[CompoundSearchCandidate] | ErrorEnvelope
-```
-
-Fuzzy search for compounds.
-
-**Parameters:**
-- `query` (str): Search term (minimum 2 characters)
+- `query` (str): Protein name, gene symbol, or accession
+- `organism` (str | None): Scientific name (e.g., "Homo sapiens")
 - `slim` (bool): Return minimal fields
 - `cursor` (str | None): Pagination cursor
-- `page_size` (int): Results per page (1-100)
+- `page_size` (int): Results per page (1-500)
 
-**Returns:**
-- `PaginationEnvelope[CompoundSearchCandidate]`: Search results
-- `ErrorEnvelope`: On errors
+**Returns**: `PaginationEnvelope[ProteinSearchCandidate] | ErrorEnvelope`
 
-**Example:**
-```python
-client = ChEMBLClient()
+##### `get_protein(uniprot_id, slim=False)`
 
-# Search by name
-result = await client.search_compounds("aspirin")
-
-for candidate in result.items:
-    print(f"{candidate.id}: {candidate.name}")
-    print(f"  Formula: {candidate.molecular_formula}")
-    print(f"  Score: {candidate.score}")
-
-# Search by molecular formula
-result = await client.search_compounds("C9H8O4")
-
-await client.close()
-```
-
-##### get_compound()
-```python
-async def get_compound(
-    self,
-    chembl_id: str,
-    slim: bool = False
-) -> dict[str, Any] | ErrorEnvelope
-```
-
-Get compound by ChEMBL CURIE.
+Get complete protein record by UniProt accession.
 
 **Parameters:**
-- `chembl_id` (str): ChEMBL CURIE in format 'CHEMBL:NNNNN' (e.g., 'CHEMBL:25')
-- `slim` (bool): Return minimal fields
+- `uniprot_id` (str): UniProt accession (e.g., `P04637`) or CURIE (`UniProtKB:P04637`)
+- `slim` (bool): Exclude large text fields
 
-**Returns:**
-- `dict`: Compound record (or slim representation)
-- `ErrorEnvelope`: On errors
+**Returns**: `Protein | ErrorEnvelope`
 
 **Example:**
+
 ```python
-client = ChEMBLClient()
+from lifesciences_mcp import UniProtClient
 
-compound = await client.get_compound("CHEMBL:25")
+async with UniProtClient() as client:
+    # Search for human TP53 protein
+    results = await client.search_proteins("TP53", organism="Homo sapiens")
 
-if not isinstance(compound, ErrorEnvelope):
-    print(f"Name: {compound['name']}")
-    print(f"SMILES: {compound.get('smiles')}")
-    print(f"Max Phase: {compound.get('max_phase')}")
-    print(f"Indications: {', '.join(compound.get('indications', []))}")
-
-    # Cross-references
-    xrefs = compound.get('cross_references', {})
-    if 'drugbank' in xrefs:
-        print(f"DrugBank: {xrefs['drugbank']}")
-
-await client.close()
+    if not isinstance(results, ErrorEnvelope):
+        protein = await client.get_protein(results.items[0].id)
+        if not isinstance(protein, ErrorEnvelope):
+            print(f"Function: {protein.function}")
+            print(f"Length: {protein.sequence_length} amino acids")
 ```
 
-**CURIE Format:**
-- Pattern: `^CHEMBL:[0-9]+$`
-- Examples: `CHEMBL:25` (aspirin), `CHEMBL:1201583`
+**See Also**: [Protein model](#protein-models), [uniprot_search_proteins tool](#uniprot-tools)
 
-##### get_compounds_batch()
-```python
-async def get_compounds_batch(
-    self,
-    chembl_ids: list[str],
-    slim: bool = True
-) -> list[dict[str, Any]] | ErrorEnvelope
-```
+---
 
-Batch lookup for multiple compounds (maximum 100).
+### ChEMBL Client
+
+#### `ChEMBLClient`
+
+**Location**: `src/lifesciences_mcp/clients/chembl.py`
+
+ChEMBL bioactivity database client for compounds and drug data.
+
+**Base URL**: `https://www.ebi.ac.uk/chembl/api/data`
+**Rate Limit**: 10 requests/second with exponential backoff
+**Inherits From**: `LifeSciencesClient`
+**Note**: Uses synchronous `chembl_webresource_client` SDK wrapped with `asyncio.run_in_executor()`
+
+**Methods:**
+
+##### `search_compounds(query, slim=False, cursor=None, page_size=50)`
+
+Fuzzy search for chemical compounds.
+
+**Parameters:**
+- `query` (str): Compound name, synonym, or identifier
+- `slim` (bool): Return minimal fields (~20 tokens vs ~100+)
+- `cursor` (str | None): Pagination cursor (Base64-encoded offset)
+- `page_size` (int): Results per page (1-100)
+
+**Returns**: `PaginationEnvelope[CompoundSearchCandidate] | ErrorEnvelope`
+
+##### `get_compound(chembl_id, slim=False)`
+
+Get complete compound record by ChEMBL CURIE.
+
+**Parameters:**
+- `chembl_id` (str): ChEMBL CURIE (e.g., `CHEMBL:25`)
+- `slim` (bool): Exclude drug indications (separate API call)
+
+**Returns**: `dict[str, Any] | ErrorEnvelope`
+
+##### `get_compounds_batch(chembl_ids, slim=True)`
+
+Batch retrieve multiple compounds (max 100).
 
 **Parameters:**
 - `chembl_ids` (list[str]): List of ChEMBL CURIEs
-- `slim` (bool): Return minimal fields (default: True for batch)
+- `slim` (bool): Exclude indications for performance
 
-**Returns:**
-- `list[dict]`: List of compound records (may include ErrorEnvelopes for individual failures)
-- `ErrorEnvelope`: On batch validation errors
+**Returns**: `list[dict[str, Any]] | ErrorEnvelope`
 
 **Example:**
+
 ```python
-client = ChEMBLClient()
+from lifesciences_mcp import ChEMBLClient
 
-# Batch lookup
-chembl_ids = ["CHEMBL:25", "CHEMBL:192", "CHEMBL:621"]
-results = await client.get_compounds_batch(chembl_ids)
+async with ChEMBLClient() as client:
+    # Search for aspirin
+    results = await client.search_compounds("aspirin", page_size=5)
 
-for result in results:
-    if 'error' not in result:
-        print(f"{result['id']}: {result['name']}")
-    else:
-        print(f"Error: {result['error']['message']}")
-
-await client.close()
+    if not isinstance(results, ErrorEnvelope):
+        # Get full record
+        compound = await client.get_compound(results.items[0].id)
+        if not isinstance(compound, ErrorEnvelope):
+            print(f"SMILES: {compound.get('smiles')}")
+            print(f"Max phase: {compound.get('max_phase')}")
 ```
 
-**Best Practices:**
-- Use batch lookup for efficiency when retrieving multiple compounds
-- Default slim=True in batch mode to manage token usage
-- Maximum 100 compounds per batch
-- Individual compounds may fail while batch succeeds
+**See Also**: [Compound model](#compound-models), [chembl_search_compounds tool](#chembl-tools)
 
 ---
 
-### OpenTargetsClient
+### Open Targets Client
 
-**File**: `src/lifesciences_mcp/clients/opentargets.py`
+#### `OpenTargetsClient`
 
-#### Description
-Open Targets Platform GraphQL API client for target-disease associations and evidence.
+**Location**: `src/lifesciences_mcp/clients/opentargets.py`
 
-**Features:**
-- GraphQL query execution
-- Rate limiting at 10 requests/second
-- Target-disease association scoring
-- Evidence source tracking
+Open Targets Platform client for target-disease associations.
 
-#### Constructor
-```python
-def __init__(self) -> None
-```
+**Base URL**: `https://api.platform.opentargets.org/api/v4`
+**API Type**: GraphQL
+**Rate Limit**: 10 requests/second
 
-**Example:**
-```python
-from lifesciences_mcp.clients import OpenTargetsClient
+**Methods:**
 
-async with OpenTargetsClient() as client:
-    result = await client.search_targets("TP53")
-```
+##### `search_targets(query, cursor=None, page_size=50)`
 
-#### Methods
+Search for therapeutic targets.
 
-##### search_targets()
-```python
-async def search_targets(
-    self,
-    query: str,
-    slim: bool = False,
-    cursor: str | None = None,
-    page_size: int = 50,
-) -> PaginationEnvelope[TargetSearchCandidate] | ErrorEnvelope
-```
+**Returns**: `PaginationEnvelope[TargetSearchCandidate] | ErrorEnvelope`
 
-Fuzzy search for targets.
+##### `get_target(target_id)`
 
-**Parameters:**
-- `query` (str): Search term (minimum 2 characters)
-- `slim` (bool): Return minimal fields
-- `cursor` (str | None): Pagination cursor
-- `page_size` (int): Results per page (1-100)
+Get target details by Ensembl gene ID.
 
-**Returns:**
-- `PaginationEnvelope[TargetSearchCandidate]`: Search results
-- `ErrorEnvelope`: On errors
+**Returns**: `Target | ErrorEnvelope`
 
-**Example:**
-```python
-async with OpenTargetsClient() as client:
-    result = await client.search_targets("kinase")
+##### `get_associations(target_id, disease_id=None, cursor=None, page_size=50)`
 
-    for candidate in result.items:
-        print(f"{candidate.approved_symbol} ({candidate.id})")
-        print(f"  {candidate.approved_name}")
-        print(f"  Score: {candidate.score}")
-```
+Get target-disease associations with evidence scores.
 
-##### get_target()
-```python
-async def get_target(
-    self,
-    ensembl_id: str,
-    slim: bool = False
-) -> Target | dict | ErrorEnvelope
-```
+**Returns**: `PaginationEnvelope[Association] | ErrorEnvelope`
 
-Get target by Ensembl gene ID.
-
-**Parameters:**
-- `ensembl_id` (str): Ensembl gene ID (format: ENSG[11 digits])
-- `slim` (bool): Return minimal fields
-
-**Returns:**
-- `Target` or `dict`: Target record
-- `ErrorEnvelope`: On errors
-
-**Example:**
-```python
-async with OpenTargetsClient() as client:
-    target = await client.get_target("ENSG00000141510")
-
-    if isinstance(target, Target):
-        print(f"Symbol: {target.approved_symbol}")
-        print(f"Function: {target.description}")
-        print(f"Biotype: {target.biotype}")
-
-        # Cross-references
-        if target.cross_references.hgnc:
-            print(f"HGNC: {target.cross_references.hgnc}")
-```
-
-##### get_associations()
-```python
-async def get_associations(
-    self,
-    target_id: str,
-    disease_id: str | None = None,
-    cursor: str | None = None,
-    page_size: int = 50,
-) -> PaginationEnvelope[Association] | ErrorEnvelope
-```
-
-Get target-disease associations.
-
-**Parameters:**
-- `target_id` (str): Ensembl gene ID
-- `disease_id` (str | None): Optional disease ID to filter (EFO/MONDO/Orphanet/HP/DOID/OTAR format)
-- `cursor` (str | None): Pagination cursor
-- `page_size` (int): Results per page (1-100)
-
-**Returns:**
-- `PaginationEnvelope[Association]`: Association records
-- `ErrorEnvelope`: On errors
-
-**Example:**
-```python
-async with OpenTargetsClient() as client:
-    # Get all associations for TP53
-    result = await client.get_associations("ENSG00000141510")
-
-    for assoc in result.items:
-        print(f"Disease: {assoc.disease_name}")
-        print(f"  Score: {assoc.score}")
-        print(f"  Evidence count: {assoc.evidence_count}")
-        print(f"  Sources: {', '.join(assoc.evidence_sources)}")
-
-    # Filter by disease
-    cancer_result = await client.get_associations(
-        "ENSG00000141510",
-        disease_id="EFO_0000616"  # neoplasm
-    )
-```
-
-**Disease ID Format:**
-- Pattern: `^(EFO|MONDO|Orphanet|HP|DOID|OTAR)_\d+$`
-- Examples: `EFO_0000616` (neoplasm), `MONDO_0005015` (diabetes)
+**See Also**: [Target model](#target-models), [opentargets_search_targets tool](#opentargets-tools)
 
 ---
 
-## Data Models
+### STRING Client
 
-All models use Pydantic for validation and serialization. Models follow the "omit-if-null" pattern: fields with no value are excluded from JSON output.
+#### `STRINGClient`
 
-### Gene
+**Location**: `src/lifesciences_mcp/clients/string.py`
 
-**File**: `src/lifesciences_mcp/models/gene.py`
+STRING database client for protein-protein interaction networks.
 
-#### Description
-Complete gene record from HGNC with Agentic Biolink cross-references.
+**Base URL**: `https://string-db.org/api`
+**Rate Limit**: 1 request/second (strict)
+**Default Species**: 9606 (Homo sapiens)
 
-#### Fields
-- `id` (str): HGNC CURIE (format: `HGNC:\d+`, e.g., 'HGNC:1100')
-- `symbol` (str): Official gene symbol (e.g., 'BRCA1')
+**Methods:**
+
+##### `search_proteins(query, limit=10)`
+
+Search for proteins to get STRING IDs.
+
+**Returns**: `PaginationEnvelope[InteractionSearchCandidate] | ErrorEnvelope`
+
+##### `get_interactions(string_id, score_threshold=400, limit=100)`
+
+Get protein interaction network.
+
+**Parameters:**
+- `string_id` (str): STRING protein ID (e.g., `9606.ENSP00000269305`)
+- `score_threshold` (int): Minimum confidence score (0-1000, default: 400 = medium)
+- `limit` (int): Max interactions to return
+
+**Returns**: `InteractionNetwork | ErrorEnvelope`
+
+**Example:**
+
+```python
+from lifesciences_mcp import STRINGClient
+
+async with STRINGClient(species=9606) as client:
+    # Search for TP53
+    results = await client.search_proteins("TP53")
+
+    if not isinstance(results, ErrorEnvelope):
+        # Get interaction network
+        network = await client.get_interactions(
+            results.items[0].id,
+            score_threshold=700  # High confidence
+        )
+        if not isinstance(network, ErrorEnvelope):
+            print(f"Found {len(network.interactions)} interactions")
+            for interaction in network.interactions[:5]:
+                print(f"  {interaction.preferred_name_b}: {interaction.score}")
+```
+
+**See Also**: [Interaction model](#interaction-models), [string_get_interactions tool](#string-tools)
+
+---
+
+### Other Client Classes
+
+#### `EnsemblClient`
+**Purpose**: Ensembl genomic database (genes, transcripts)
+**Base URL**: `https://rest.ensembl.org`
+**Methods**: `search_genes()`, `get_gene()`, `get_transcript()`
+
+#### `EntrezClient`
+**Purpose**: NCBI Entrez/Gene database
+**Base URL**: `https://eutils.ncbi.nlm.nih.gov/entrez/eutils`
+**Methods**: `search_genes()`, `get_gene()`, `get_pubmed_links()`
+**Note**: Optional API key via `NCBI_API_KEY` environment variable
+
+#### `BioGridClient`
+**Purpose**: BioGRID genetic and protein interactions
+**Base URL**: `https://webservice.thebiogrid.org`
+**Methods**: `search_genes()`, `get_interactions()`
+**Note**: Requires free API key via `BIOGRID_API_KEY`
+
+#### `PubChemClient`
+**Purpose**: PubChem chemical compound database
+**Base URL**: `https://pubchem.ncbi.nlm.nih.gov/rest/pug`
+**Methods**: `search_compounds()`, `get_compound()`
+
+#### `IUPHARClient`
+**Purpose**: IUPHAR/Guide to Pharmacology (ligands and targets)
+**Base URL**: `https://www.guidetopharmacology.org/services`
+**Methods**: `search_ligands()`, `get_ligand()`, `search_targets()`, `get_target()`
+
+#### `WikiPathwaysClient`
+**Purpose**: WikiPathways biological pathway database
+**Base URL**: `https://webservice.wikipathways.org`
+**Methods**: `search_pathways()`, `get_pathway()`, `get_pathways_for_gene()`, `get_pathway_components()`
+
+#### `ClinicalTrialsClient`
+**Purpose**: ClinicalTrials.gov clinical study database
+**Base URL**: `https://clinicaltrials.gov/api/v2`
+**Methods**: `search_trials()`, `get_trial()`, `get_trial_locations()`
+
+#### `DrugBankClient`
+**Purpose**: DrugBank drug database
+**Base URL**: `https://api.drugbank.com`
+**Methods**: `search_drugs()`, `get_drug()`
+**Note**: Requires commercial API key; excluded from gateway
+
+---
+
+## Model Classes
+
+All models are Pydantic v2 BaseModel subclasses with validation and serialization.
+
+### Envelope Models
+
+#### `ErrorEnvelope`
+
+**Location**: `src/lifesciences_mcp/models/envelopes.py`
+
+Canonical error response format for all tools.
+
+**Fields:**
+- `success` (bool): Always `False`
+- `error` (ErrorDetail): Error details with recovery hint
+
+**ErrorDetail Fields:**
+- `code` (ErrorCode): Standard error code enum
+- `message` (str): Human-readable error message
+- `recovery_hint` (str): Agent-actionable guidance for self-correction
+- `invalid_input` (str | None): The input that caused the error
+
+**Error Codes:**
+- `UNRESOLVED_ENTITY`: Raw string passed to strict tool (need fuzzy search first)
+- `ENTITY_NOT_FOUND`: Valid CURIE but no record in database
+- `AMBIGUOUS_QUERY`: Too many results or too generic query
+- `RATE_LIMITED`: Upstream API throttling
+- `UPSTREAM_ERROR`: API failure or network error
+- `INVALID_CROSS_REFERENCE`: Cross-reference format validation failed
+
+**Factory Methods:**
+```python
+ErrorEnvelope.unresolved_entity(invalid_input)
+ErrorEnvelope.entity_not_found(hgnc_id)
+ErrorEnvelope.ambiguous_query(query, result_count)
+ErrorEnvelope.rate_limited(retry_after=None)
+ErrorEnvelope.upstream_error(status_code, detail=None)
+```
+
+#### `PaginationEnvelope[T]`
+
+**Location**: `src/lifesciences_mcp/models/envelopes.py`
+
+Generic pagination wrapper for list operations.
+
+**Fields:**
+- `items` (list[T]): Data payload
+- `pagination` (Pagination): Pagination metadata
+
+**Pagination Fields:**
+- `cursor` (str | None): Opaque cursor for next page (null = end)
+- `total_count` (int | None): Total items if known
+- `page_size` (int): Items per page
+
+**Factory Method:**
+```python
+PaginationEnvelope.create(items, cursor=None, total_count=None, page_size=50)
+```
+
+---
+
+### Gene Models
+
+#### `Gene`
+
+**Location**: `src/lifesciences_mcp/models/gene.py`
+
+Complete gene record from HGNC with cross-references.
+
+**Key Fields:**
+- `id` (str): HGNC CURIE (e.g., `HGNC:1100`)
+- `symbol` (str): Official gene symbol (e.g., `BRCA1`)
 - `name` (str): Full gene name
-- `status` (str): Approval status ('Approved', 'Withdrawn', 'Entry Withdrawn')
-- `locus_type` (str | None): Gene type classification
-- `locus_group` (str | None): Gene group classification
-- `location` (str | None): Chromosomal location (e.g., '17q21.31')
+- `status` (str): Approval status (Approved, Withdrawn, Entry Withdrawn)
+- `location` (str | None): Chromosomal location (e.g., `17q21.31`)
 - `alias_symbols` (list[str] | None): Alternative symbols
-- `alias_names` (list[str] | None): Alternative names
 - `prev_symbols` (list[str] | None): Previous symbols
-- `prev_names` (list[str] | None): Previous names
-- `cross_references` (CrossReferences): External database identifiers
+- `cross_references` (CrossReferences): External database IDs
 
-#### Example
-```python
-from lifesciences_mcp.models import Gene
+**Token Count**: ~115-300 tokens depending on cross-references
 
-# Create gene from API response
-gene = Gene(
-    id="HGNC:1100",
-    symbol="BRCA1",
-    name="BRCA1 DNA repair associated",
-    status="Approved",
-    locus_type="gene with protein product",
-    location="17q21.31",
-    cross_references={
-        "ensembl_gene": "ENSG00000012048",
-        "uniprot": ["P38398"],
-        "entrez": "672"
-    }
-)
+#### `SearchCandidate`
 
-# Access fields
-print(gene.symbol)  # BRCA1
-print(gene.cross_references.ensembl_gene)  # ENSG00000012048
+Lightweight gene representation for fuzzy search (~20 tokens).
 
-# JSON serialization (None values omitted)
-json_data = gene.model_dump()
-json_str = gene.model_dump_json()
-```
+**Key Fields:**
+- `id` (str): HGNC CURIE
+- `symbol` (str): Gene symbol
+- `name` (str): Gene name
+- `score` (float): Relevance score (0.0-1.0)
 
-#### Validation
-- `id` must match pattern `HGNC:\d+`
-- `status` must be one of: 'Approved', 'Withdrawn', 'Entry Withdrawn'
-- Empty lists and empty strings are converted to None
+#### `CrossReferences`
 
----
+**Location**: `src/lifesciences_mcp/models/gene.py`
 
-### SearchCandidate
+External database identifiers per 22-key registry. Keys omitted if no value (never null).
 
-**File**: `src/lifesciences_mcp/models/gene.py`
-
-#### Description
-Lightweight gene representation for fuzzy search results. Token budget: ~20 tokens per entity.
-
-#### Fields
-- `id` (str): HGNC CURIE (pattern: `HGNC:\d+`)
-- `symbol` (str): Official gene symbol
-- `name` (str): Full gene name
-- `score` (float): Relevance score (0.0-1.0, where 1.0 is perfect match)
-
-#### Example
-```python
-from lifesciences_mcp.models import SearchCandidate
-
-candidate = SearchCandidate(
-    id="HGNC:1100",
-    symbol="BRCA1",
-    name="BRCA1 DNA repair associated",
-    score=1.0
-)
-
-# Convert Gene to SearchCandidate
-gene = await client.get_gene("HGNC:1100")
-candidate = gene.to_search_candidate(score=0.95)
-```
-
----
-
-### CrossReferences
-
-**File**: `src/lifesciences_mcp/models/gene.py`
-
-#### Description
-External database identifiers per the 22-key registry. Keys are omitted if no value exists.
-
-#### Fields (22-key registry)
-
-**Core identifiers:**
-- `ensembl_gene` (str | None): Ensembl gene ID (e.g., ENSG00000012048)
+**Core Identifiers:**
+- `ensembl_gene` (str | None): Ensembl gene ID (e.g., `ENSG00000012048`)
 - `ensembl_transcript` (list[str] | None): Ensembl transcript IDs
 - `uniprot` (list[str] | None): UniProt accessions
 - `entrez` (str | None): NCBI Entrez gene ID
 - `refseq` (list[str] | None): RefSeq accessions
-- `hgnc` (str | None): HGNC gene ID (e.g., HGNC:5)
+- `hgnc` (str | None): HGNC gene ID
 
-**Disease/phenotype:**
+**Disease/Phenotype:**
 - `omim` (str | None): OMIM ID
-- `orphanet` (str | None): Orphanet rare disease ID (e.g., ORPHA:558)
+- `orphanet` (str | None): Orphanet rare disease ID
 - `mondo` (str | None): MONDO disease ontology ID
 - `efo` (str | None): Experimental Factor Ontology ID
 
-**Drug/compound:**
+**Drug/Compound:**
 - `chembl` (str | None): ChEMBL target/compound ID
-- `drugbank` (str | None): DrugBank ID (e.g., DB01050)
+- `drugbank` (str | None): DrugBank ID
 - `pubchem_compound` (str | None): PubChem compound ID
 - `pubchem_substance` (str | None): PubChem substance ID
 
-**Pathway databases:**
+**Pathway:**
 - `kegg` (str | None): KEGG gene ID
 - `kegg_pathway` (list[str] | None): KEGG pathway IDs
 
-**Interaction databases:**
+**Interaction:**
 - `string` (str | None): STRING protein ID
 - `biogrid` (str | None): BioGRID gene ID
-- `stitch` (str | None): STITCH chemical-protein interaction ID
+- `stitch` (str | None): STITCH chemical-protein ID
 - `iuphar` (str | None): IUPHAR/GtoPdb ligand or target ID
 
 **Structural:**
 - `pdb` (list[str] | None): Protein Data Bank IDs
 
-#### Example
-```python
-from lifesciences_mcp.models import CrossReferences
-
-# Create with some references
-xrefs = CrossReferences(
-    ensembl_gene="ENSG00000141510",
-    uniprot=["P04637"],
-    entrez="7157",
-    pdb=["1TUP", "1TSR", "1YCR"]
-)
-
-# Access fields
-print(xrefs.ensembl_gene)  # ENSG00000141510
-print(xrefs.uniprot)  # ['P04637']
-
-# JSON output omits None values
-json_data = xrefs.model_dump()
-# {'ensembl_gene': 'ENSG00000141510', 'uniprot': ['P04637'], 'entrez': '7157', 'pdb': ['1TUP', '1TSR', '1YCR']}
-```
-
-**Validation:**
-- Empty strings and empty lists are automatically converted to None
-- Fields with None values are excluded from JSON serialization
-- Pattern validation for each ID type
+**Method:**
+- `model_dump(**kwargs)`: Excludes None values (ADR-001 principle)
 
 ---
 
-### Protein
+### Protein Models
 
-**File**: `src/lifesciences_mcp/models/protein.py`
+#### `Protein`
 
-#### Description
-Complete protein record from UniProt with Agentic Biolink cross-references. Token budget: ~115-300 tokens in full mode, ~20 tokens in slim mode.
+**Location**: `src/lifesciences_mcp/models/protein.py`
 
-#### Fields
-- `id` (str): UniProt CURIE (format: `UniProtKB:[A-Z][A-Z0-9]{5,9}`, e.g., 'UniProtKB:P04637')
-- `accession` (str): Raw UniProt accession ID (e.g., 'P04637')
+Complete protein record from UniProt.
+
+**Key Fields:**
+- `id` (str): UniProt CURIE (e.g., `UniProtKB:P04637`)
+- `accession` (str): Raw accession (e.g., `P04637`)
 - `name` (str): Protein name
-- `full_name` (str | None): Recommended full name
 - `gene_names` (list[str] | None): Associated gene symbols
-- `organism` (str): Scientific name (e.g., 'Homo sapiens')
-- `organism_id` (int | None): NCBI Taxonomy ID
-- `function` (str | None): Functional description
-- `sequence_length` (int | None): Amino acid sequence length
-- `cross_references` (CrossReferences): Cross-references to external databases
-
-#### Example
-```python
-from lifesciences_mcp.models import Protein
-
-protein = Protein(
-    id="UniProtKB:P04637",
-    accession="P04637",
-    name="Cellular tumor antigen p53",
-    full_name="Cellular tumor antigen p53",
-    gene_names=["TP53", "P53"],
-    organism="Homo sapiens",
-    organism_id=9606,
-    function="Acts as a tumor suppressor...",
-    sequence_length=393,
-    cross_references={
-        "hgnc": "HGNC:11998",
-        "ensembl_gene": "ENSG00000141510",
-        "pdb": ["1TUP", "1TSR", "1YCR"]
-    }
-)
-
-# Access fields
-print(protein.name)
-print(f"Length: {protein.sequence_length} aa")
-print(f"Gene: {protein.gene_names[0]}")
-```
-
-**CURIE Validation:**
-- Pattern: `^UniProtKB:[A-Z][A-Z0-9]{5,9}$`
-- Must start with uppercase letter
-- Followed by 5-9 uppercase alphanumeric characters
-- Total accession length: 6-10 characters
-
----
-
-### ProteinSearchCandidate
-
-**File**: `src/lifesciences_mcp/models/protein.py`
-
-#### Description
-Lightweight protein match for fuzzy search results. Token budget: ~20 tokens per entity.
-
-#### Fields
-- `id` (str): UniProt CURIE
-- `name` (str): Protein name
 - `organism` (str): Scientific name
-- `gene_names` (list[str] | None): Associated gene symbols
-- `score` (float): Relevance score (0.0-1.0)
+- `function` (str | None): Functional description
+- `sequence_length` (int | None): Amino acid count
+- `cross_references` (CrossReferences): External database IDs
 
-#### Example
-```python
-from lifesciences_mcp.models import ProteinSearchCandidate
+#### `ProteinSearchCandidate`
 
-candidate = ProteinSearchCandidate(
-    id="UniProtKB:P04637",
-    name="Cellular tumor antigen p53",
-    organism="Homo sapiens",
-    gene_names=["TP53"],
-    score=1.0
-)
-```
+Lightweight protein for search results.
+
+**Key Fields:**
+- `id`, `name`, `organism`, `gene_names`, `score`
 
 ---
 
-### Compound
+### Compound Models
 
-**File**: `src/lifesciences_mcp/models/compound.py`
+#### `Compound`
 
-#### Description
-Complete ChEMBL compound record with Agentic Biolink cross-references. Token budget: ~115-300 tokens in full mode, ~20 tokens in slim mode.
+**Location**: `src/lifesciences_mcp/models/compound.py`
 
-#### Fields
-- `id` (str): ChEMBL CURIE (format: `CHEMBL:[0-9]+`, e.g., 'CHEMBL:25')
-- `name` (str | None): Preferred compound name
-- `molecular_formula` (str | None): Molecular formula (e.g., 'C9H8O4')
-- `molecular_weight` (float | None): Molecular weight in g/mol
-- `smiles` (str | None): Simplified Molecular-Input Line-Entry System notation
-- `inchi` (str | None): International Chemical Identifier
-- `max_phase` (int | None): Maximum clinical phase (0-4) reached
-- `indications` (list[str]): Approved indications (Mesh headings)
-- `canonical_name` (str | None): Canonical IUPAC name
-- `synonyms` (list[str]): Alternative names and trade names
-- `cross_references` (dict[str, list[str]]): Cross-references using 22-key registry
+Chemical compound from ChEMBL.
 
-#### Methods
+**Key Fields:**
+- `id` (str): ChEMBL CURIE (e.g., `CHEMBL:25`)
+- `name` (str): Compound name
+- `molecular_formula` (str | None): Chemical formula
+- `molecular_weight` (float | None): Molecular weight
+- `smiles` (str | None): SMILES notation
+- `inchi` (str | None): InChI identifier
+- `max_phase` (int | None): Clinical development phase (0-4)
+- `indications` (list[dict] | None): Drug indications
+- `synonyms` (list[str] | None): Alternative names
+- `cross_references` (dict): Cross-references to other databases
 
-##### to_slim()
-```python
-def to_slim(self) -> dict[str, Any]
-```
+**Method:**
+- `to_slim()`: Returns minimal dict for token efficiency
 
-Return slim representation with minimal fields (~20 tokens).
+#### `CompoundSearchCandidate`
 
-**Returns:**
-- `dict`: Contains only id, name, and molecular_formula
-
-#### Example
-```python
-from lifesciences_mcp.models import Compound
-
-compound = Compound(
-    id="CHEMBL:25",
-    name="Aspirin",
-    molecular_formula="C9H8O4",
-    molecular_weight=180.16,
-    smiles="CC(=O)Oc1ccccc1C(=O)O",
-    max_phase=4,
-    indications=["Pain", "Fever"],
-    synonyms=["Acetylsalicylic acid", "ASA"],
-    cross_references={
-        "pubchem_compound": ["2244"],
-        "drugbank": ["DB:00945"]
-    }
-)
-
-# Slim mode
-slim = compound.to_slim()
-# {'id': 'CHEMBL:25', 'name': 'Aspirin', 'molecular_formula': 'C9H8O4'}
-```
+Lightweight compound for search results.
 
 ---
 
-### Target
+### Interaction Models
 
-**File**: `src/lifesciences_mcp/models/target.py`
+#### `InteractionNetwork`
 
-#### Description
-Complete Open Targets target record with Agentic Biolink cross-references. Token budget: ~115-300 tokens in full mode, ~20 tokens in slim mode.
+**Location**: `src/lifesciences_mcp/models/interaction.py`
 
-#### Fields
-- `id` (str): Ensembl gene ID (pattern: `ENSG\d{11}`)
-- `approved_symbol` (str | None): HGNC approved gene symbol
-- `approved_name` (str | None): HGNC approved gene name
-- `biotype` (str | None): Gene biotype (e.g., 'protein_coding', 'lncRNA')
-- `description` (str | None): Gene function description
-- `associated_diseases_count` (int | None): Total number of associated diseases
-- `cross_references` (CrossReferences): Cross-references to external databases
+Protein-protein interaction network from STRING.
 
-#### Methods
+**Key Fields:**
+- `query_protein_id` (str): STRING ID of query protein
+- `interactions` (list[Interaction]): List of interactions
+- `cross_references` (InteractionCrossReferences): Cross-references for network
 
-##### to_slim()
-```python
-def to_slim(self) -> dict
-```
+#### `Interaction`
 
-Return slim mode representation (~20 tokens). Excludes description, associated_diseases_count, and cross_references.
+Single protein-protein interaction.
 
-#### Example
-```python
-from lifesciences_mcp.models import Target
+**Key Fields:**
+- `protein_a` (str): STRING ID of first protein
+- `protein_b` (str): STRING ID of second protein
+- `preferred_name_a` (str): Gene symbol for protein A
+- `preferred_name_b` (str): Gene symbol for protein B
+- `score` (int): Combined confidence score (0-1000)
+- `evidence_scores` (EvidenceScores): Breakdown by evidence type
 
-target = Target(
-    id="ENSG00000141510",
-    approved_symbol="TP53",
-    approved_name="tumor protein p53",
-    biotype="protein_coding",
-    description="Tumor suppressor gene...",
-    associated_diseases_count=245,
-    cross_references={
-        "hgnc": "HGNC:11998",
-        "uniprot": "UniProtKB:P04637"
-    }
-)
+#### `EvidenceScores`
 
-# Slim mode
-slim = target.to_slim()
-# {'id': 'ENSG00000141510', 'approved_symbol': 'TP53', 'approved_name': 'tumor protein p53', 'biotype': 'protein_coding'}
-```
+Evidence type breakdown for STRING interactions.
+
+**Fields:**
+- `neighborhood` (int): Genomic neighborhood
+- `fusion` (int): Gene fusion
+- `cooccurrence` (int): Phylogenetic co-occurrence
+- `coexpression` (int): Co-expression
+- `experimental` (int): Experimental data
+- `database` (int): Curated databases
+- `textmining` (int): Text mining
+- `combined_score` (int): Combined confidence (0-1000)
 
 ---
 
-### Association
+### Target Models
 
-**File**: `src/lifesciences_mcp/models/target.py`
+#### `Target`
 
-#### Description
-Target-disease association with aggregated evidence. Token budget: ~60-80 tokens per association.
+**Location**: `src/lifesciences_mcp/models/target.py`
 
-#### Fields
-- `target_id` (str): Ensembl gene ID
-- `disease_id` (str): Disease ID (format: `(EFO|MONDO|Orphanet|HP|DOID|OTAR)_\d+`)
-- `disease_name` (str): Human-readable disease name
-- `score` (float): Overall association score (0.0-1.0, higher = stronger evidence)
-- `evidence_count` (int): Total number of evidence sources
-- `evidence_sources` (list[str]): Data type IDs (e.g., 'genetic_association', 'somatic_mutation')
+Therapeutic target from Open Targets.
 
-#### Example
-```python
-from lifesciences_mcp.models import Association
+**Key Fields:**
+- `id` (str): Ensembl gene ID
+- `approved_symbol` (str): Gene symbol
+- `approved_name` (str): Gene name
+- `biotype` (str): Gene biotype
+- `associations` (list[Association]): Target-disease associations
 
-assoc = Association(
-    target_id="ENSG00000141510",
-    disease_id="EFO_0000616",
-    disease_name="neoplasm",
-    score=0.85,
-    evidence_count=142,
-    evidence_sources=["genetic_association", "somatic_mutation", "drugs"]
-)
-```
+#### `Association`
+
+Target-disease association from Open Targets.
+
+**Key Fields:**
+- `disease_id` (str): Disease ID
+- `disease_name` (str): Disease name
+- `score` (float): Association score (0.0-1.0)
+- `datasource_count` (int): Number of supporting data sources
 
 ---
 
-### EnsemblGene
+### Pathway Models
 
-**File**: `src/lifesciences_mcp/models/ensembl.py`
+#### `Pathway`
 
-#### Description
-Complete gene record from Ensembl with Agentic Biolink cross-references. Token budget: ~150-350 tokens.
+**Location**: `src/lifesciences_mcp/models/pathway.py`
 
-#### Fields
-- `id` (str): Ensembl Gene ID (pattern: `ENSG\d{11}`)
-- `symbol` (str): Official gene symbol
-- `name` (str): Gene description/name
-- `biotype` (str): Gene biotype (e.g., 'protein_coding', 'lncRNA')
-- `species` (str): Species name (e.g., 'homo_sapiens')
-- `assembly_name` (str): Genome assembly (e.g., 'GRCh38')
-- `chromosome` (str): Chromosome/seq_region_name
-- `start` (int): Genomic start position
-- `end` (int): Genomic end position
-- `strand` (int): Strand (+1 or -1)
-- `transcripts` (list[str] | None): List of Ensembl Transcript IDs
-- `cross_references` (EnsemblCrossReferences): External database identifiers
+Biological pathway from WikiPathways.
 
-#### Validation
-- `id` must match pattern `ENSG\d{11}`
-- `strand` must be 1 or -1
-- `start` must be less than `end`
+**Key Fields:**
+- `id` (str): WikiPathways CURIE (e.g., `WP:254`)
+- `title` (str): Pathway title
+- `organism` (str): Organism name
+- `description` (str | None): Pathway description
+- `url` (str): WikiPathways URL
+- `component_counts` (ComponentCounts): Gene/metabolite counts
 
-#### Example
-```python
-from lifesciences_mcp.models import EnsemblGene
+#### `PathwayComponents`
 
-gene = EnsemblGene(
-    id="ENSG00000141510",
-    symbol="TP53",
-    name="tumor protein p53",
-    biotype="protein_coding",
-    species="homo_sapiens",
-    assembly_name="GRCh38",
-    chromosome="17",
-    start=7661779,
-    end=7687538,
-    strand=-1,
-    transcripts=["ENST00000269305", "ENST00000445888"],
-    cross_references={
-        "hgnc": "HGNC:11998",
-        "uniprot": ["P04637"]
-    }
-)
-```
+**Location**: `src/lifesciences_mcp/models/pathway_components.py`
+
+Detailed pathway components.
+
+**Key Fields:**
+- `pathway_id` (str): WikiPathways ID
+- `genes` (list[DataNode]): Gene nodes
+- `metabolites` (list[DataNode]): Metabolite nodes
+- `interactions` (list[Interaction]): Pathway interactions
 
 ---
 
-## Envelope Models
+### Trial Models
 
-All API responses use canonical envelope models for consistency.
+#### `Trial`
 
-### PaginationEnvelope
+**Location**: `src/lifesciences_mcp/models/trial.py`
 
-**File**: `src/lifesciences_mcp/models/envelopes.py`
+Clinical trial from ClinicalTrials.gov.
 
-#### Description
-Canonical pagination envelope for all list/search operations per ADR-001 Section 8.
+**Key Fields:**
+- `id` (str): NCT number (e.g., `NCT03997058`)
+- `title` (str): Brief title
+- `status` (str): Recruitment status
+- `phase` (str): Clinical phase
+- `conditions` (list[str]): Medical conditions
+- `interventions` (list[str]): Interventions being studied
+- `sponsor` (Sponsor): Lead sponsor and collaborators
+- `eligibility` (EligibilityCriteria): Inclusion/exclusion criteria
 
-#### Fields
-- `items` (list[T]): Data payload (generic type)
-- `pagination` (Pagination): Pagination metadata
+#### `TrialLocation`
 
-#### Pagination Metadata
-- `cursor` (str | None): Opaque cursor for next page; null means end of results
-- `total_count` (int | None): Total items if known (may be None for some APIs)
-- `page_size` (int): Items per page (default: 50)
+**Location**: `src/lifesciences_mcp/models/trial_location.py`
 
-#### Class Methods
+Study site location.
 
-##### create()
-```python
-@classmethod
-def create(
-    cls,
-    items: list[T],
-    cursor: str | None = None,
-    total_count: int | None = None,
-    page_size: int = 50,
-) -> "PaginationEnvelope[T]"
-```
-
-Create a pagination envelope with the given items and metadata.
-
-#### Example
-```python
-from lifesciences_mcp.models import PaginationEnvelope, SearchCandidate
-
-# Create envelope
-candidates = [
-    SearchCandidate(id="HGNC:1100", symbol="BRCA1", name="...", score=1.0),
-    SearchCandidate(id="HGNC:5", symbol="A1BG", name="...", score=0.95)
-]
-
-envelope = PaginationEnvelope.create(
-    items=candidates,
-    cursor="eyJvZmZzZXQiOiA1MH0=",
-    total_count=250,
-    page_size=50
-)
-
-# Access fields
-print(f"Results: {len(envelope.items)}")
-print(f"Total: {envelope.pagination.total_count}")
-
-# Check for more pages
-if envelope.pagination.cursor:
-    print("More results available")
-```
+**Key Fields:**
+- `facility_name` (str): Facility name
+- `city`, `state`, `country` (str): Location
+- `recruitment_status` (str): Site-specific status
 
 ---
 
-### ErrorEnvelope
+### Database-Specific Models
 
-**File**: `src/lifesciences_mcp/models/envelopes.py`
+#### `EntrezGene`
+**Location**: `src/lifesciences_mcp/models/entrez.py`
+**Purpose**: NCBI Gene records with PubMed links
 
-#### Description
-Canonical error envelope for all error responses. Provides actionable recovery hints for agent self-correction.
+#### `EnsemblGene`, `EnsemblTranscript`
+**Location**: `src/lifesciences_mcp/models/ensembl.py`
+**Purpose**: Ensembl genomic data
 
-#### Fields
-- `success` (bool): Always False for errors
-- `error` (ErrorDetail): Error details with recovery hint
+#### `PubChemCompound`
+**Location**: `src/lifesciences_mcp/models/pubchem_compound.py`
+**Purpose**: PubChem chemical compounds
 
-#### ErrorDetail Fields
-- `code` (ErrorCode): Error code from registry (enum)
-- `message` (str): Human-readable error message
-- `recovery_hint` (str): Agent-actionable guidance for recovery
-- `invalid_input` (str | None): The input that caused the error
+#### `Ligand`, `PharmacologicalTarget`
+**Location**: `src/lifesciences_mcp/models/pharmacology.py`
+**Purpose**: IUPHAR pharmacology data
 
-#### Error Codes
+#### `Drug`, `DrugSearchCandidate`
+**Location**: `src/lifesciences_mcp/models/drug.py`
+**Purpose**: DrugBank drug records
 
-```python
-class ErrorCode(str, Enum):
-    UNRESOLVED_ENTITY = "UNRESOLVED_ENTITY"      # Raw string passed to strict tool
-    ENTITY_NOT_FOUND = "ENTITY_NOT_FOUND"        # Valid CURIE but no record
-    AMBIGUOUS_QUERY = "AMBIGUOUS_QUERY"          # Too many/few results or invalid query
-    RATE_LIMITED = "RATE_LIMITED"                # Too many requests
-    UPSTREAM_ERROR = "UPSTREAM_ERROR"            # External API failure
-    INVALID_CROSS_REFERENCE = "INVALID_CROSS_REFERENCE"  # Invalid xref format
-```
-
-#### Class Methods
-
-##### unresolved_entity()
-```python
-@classmethod
-def unresolved_entity(cls, invalid_input: str) -> "ErrorEnvelope"
-```
-
-Create UNRESOLVED_ENTITY error for raw string passed to strict tool.
-
-##### entity_not_found()
-```python
-@classmethod
-def entity_not_found(cls, hgnc_id: str) -> "ErrorEnvelope"
-```
-
-Create ENTITY_NOT_FOUND error for valid CURIE with no record.
-
-##### ambiguous_query()
-```python
-@classmethod
-def ambiguous_query(cls, query: str, result_count: int) -> "ErrorEnvelope"
-```
-
-Create AMBIGUOUS_QUERY error for too many or too few results.
-
-##### rate_limited()
-```python
-@classmethod
-def rate_limited(cls, retry_after: int | None = None) -> "ErrorEnvelope"
-```
-
-Create RATE_LIMITED error for upstream API throttling.
-
-##### upstream_error()
-```python
-@classmethod
-def upstream_error(cls, status_code: int, detail: str | None = None) -> "ErrorEnvelope"
-```
-
-Create UPSTREAM_ERROR for API failures.
-
-#### Example
-```python
-from lifesciences_mcp.models import ErrorEnvelope, ErrorCode
-
-# Check if response is error
-result = await client.get_gene("invalid-id")
-
-if isinstance(result, ErrorEnvelope):
-    print(f"Error: {result.error.code}")
-    print(f"Message: {result.error.message}")
-    print(f"Recovery: {result.error.recovery_hint}")
-    print(f"Input: {result.error.invalid_input}")
-
-    # Handle specific error codes
-    if result.error.code == ErrorCode.UNRESOLVED_ENTITY:
-        # Try search instead
-        search_result = await client.search_genes(result.error.invalid_input)
-    elif result.error.code == ErrorCode.RATE_LIMITED:
-        # Wait and retry
-        await asyncio.sleep(60)
-        retry_result = await client.get_gene("HGNC:1100")
-
-# Create custom error
-error = ErrorEnvelope.ambiguous_query("BR", 150)
-```
-
-**Error Recovery Patterns:**
-- `UNRESOLVED_ENTITY`: Call search tool to resolve identifier
-- `ENTITY_NOT_FOUND`: Verify ID or try alternate database
-- `AMBIGUOUS_QUERY`: Refine query with more specific terms
-- `RATE_LIMITED`: Wait specified time before retry
-- `UPSTREAM_ERROR`: Retry after delay or try alternate source
+#### `GeneticInteraction`, `InteractionResult`
+**Location**: `src/lifesciences_mcp/models/biogrid.py`
+**Purpose**: BioGRID interaction data
 
 ---
 
-## Server APIs
+## MCP Server Tools
 
-All servers use FastMCP framework and expose tools following the Fuzzy-to-Fact protocol.
+All tools accessible via the gateway server at `https://lifesciences-research.fastmcp.app/mcp`.
 
-### Gateway Server
+### Tools Summary
 
-**File**: `src/lifesciences_mcp/servers/gateway.py`
+| Database | Search Tool | Get Tool | Additional Tools | Total |
+|----------|------------|----------|------------------|-------|
+| HGNC | `hgnc_search_genes` | `hgnc_get_gene` | - | 2 |
+| UniProt | `uniprot_search_proteins` | `uniprot_get_protein` | - | 2 |
+| ChEMBL | `chembl_search_compounds` | `chembl_get_compound` | `chembl_get_compounds_batch` | 3 |
+| Open Targets | `opentargets_search_targets` | `opentargets_get_target` | `opentargets_get_associations` | 3 |
+| STRING | `string_search_proteins` | `string_get_interactions` | `string_get_network_image_url` | 3 |
+| BioGRID | `biogrid_search_genes` | `biogrid_get_interactions` | - | 2 |
+| Ensembl | `ensembl_search_genes` | `ensembl_get_gene` | `ensembl_get_transcript` | 3 |
+| Entrez | `entrez_search_genes` | `entrez_get_gene` | `entrez_get_pubmed_links` | 3 |
+| PubChem | `pubchem_search_compounds` | `pubchem_get_compound` | - | 2 |
+| IUPHAR | `iuphar_search_ligands`, `iuphar_search_targets` | `iuphar_get_ligand`, `iuphar_get_target` | - | 4 |
+| WikiPathways | `wikipathways_search_pathways` | `wikipathways_get_pathway` | `wikipathways_get_pathways_for_gene`, `wikipathways_get_pathway_components` | 4 |
+| ClinicalTrials | `clinicaltrials_search_trials` | `clinicaltrials_get_trial` | `clinicaltrials_get_trial_locations` | 3 |
+| **Total** | | | | **34** |
 
-#### Description
-Unified gateway server composing all 13 individual MCP servers into a single deployment. Provides access to all life sciences APIs through a consistent interface.
+### Tool Parameters
 
-**Mounted Servers:**
-- HGNC (gene nomenclature)
-- UniProt (protein data)
-- Ensembl (genomic data)
-- ChEMBL (compound bioactivity)
-- Open Targets (target-disease associations)
-- STRING (protein interactions)
-- BioGRID (genetic interactions)
-- Entrez (NCBI genes)
-- PubChem (chemical compounds)
-- IUPHAR (pharmacology)
-- WikiPathways (biological pathways)
-- ClinicalTrials (clinical trials)
+#### Standard Parameters (All Search Tools)
 
-**Note:** DrugBank is excluded (requires commercial API key)
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `query` | string | Yes | - | Search term (min 2 chars) |
+| `slim` | boolean | No | false | Return minimal fields |
+| `cursor` | string | No | null | Opaque pagination cursor |
+| `page_size` | integer | No | 50 | Results per page (1-100) |
 
-#### Available Tools
+#### Standard Parameters (All Get Tools)
 
-All tools are prefixed with database name:
-
-**HGNC:**
-- `hgnc_search_genes`: Fuzzy gene search
-- `hgnc_get_gene`: Strict gene lookup
-
-**UniProt:**
-- `uniprot_search_proteins`: Fuzzy protein search
-- `uniprot_get_protein`: Strict protein lookup
-
-**ChEMBL:**
-- `chembl_search_compounds`: Fuzzy compound search
-- `chembl_get_compound`: Strict compound lookup
-- `chembl_get_compounds_batch`: Batch compound lookup
-
-**Open Targets:**
-- `opentargets_search_targets`: Fuzzy target search
-- `opentargets_get_target`: Strict target lookup
-- `opentargets_get_associations`: Target-disease associations
-
-**STRING:**
-- `string_search_proteins`: Fuzzy protein search
-- `string_get_interactions`: Protein-protein interactions
-- `string_get_network_image_url`: Network visualization URL
-
-**BioGRID:**
-- `biogrid_search_genes`: Fuzzy gene search
-- `biogrid_get_interactions`: Genetic/protein interactions
-
-**Ensembl:**
-- `ensembl_search_genes`: Fuzzy gene search
-- `ensembl_get_gene`: Strict gene lookup
-- `ensembl_get_transcript`: Transcript lookup
-
-**Entrez:**
-- `entrez_search_genes`: Fuzzy gene search
-- `entrez_get_gene`: Strict gene lookup
-- `entrez_get_pubmed_links`: PubMed literature links
-
-**PubChem:**
-- `pubchem_search_compounds`: Fuzzy compound search
-- `pubchem_get_compound`: Strict compound lookup
-
-**IUPHAR:**
-- `iuphar_search_ligands`: Fuzzy ligand search
-- `iuphar_get_ligand`: Strict ligand lookup
-- `iuphar_search_targets`: Fuzzy target search
-- `iuphar_get_target`: Strict target lookup
-
-**WikiPathways:**
-- `wikipathways_search_pathways`: Fuzzy pathway search
-- `wikipathways_get_pathway`: Strict pathway lookup
-- `wikipathways_get_pathways_for_gene`: Pathways containing gene
-- `wikipathways_get_pathway_components`: Pathway components
-
-**ClinicalTrials:**
-- `clinicaltrials_search_trials`: Fuzzy trial search
-- `clinicaltrials_get_trial`: Strict trial lookup
-- `clinicaltrials_get_trial_locations`: Trial locations
-
-#### Configuration
-
-```python
-# Run locally
-uv run fastmcp run src/lifesciences_mcp/servers/gateway.py
-
-# FastMCP Cloud deployment
-# Entrypoint: src/lifesciences_mcp/servers/gateway.py:mcp
-```
-
-#### Example Usage
-
-```python
-# Connect to gateway via MCP protocol
-# (Typically done by LLM client like Claude)
-
-# Example tool call sequence:
-# 1. Fuzzy search
-response = await call_tool("hgnc_search_genes", {"query": "BRCA1"})
-
-# 2. Extract CURIE from top candidate
-hgnc_id = response.items[0].id  # "HGNC:1100"
-
-# 3. Strict lookup
-gene = await call_tool("hgnc_get_gene", {"hgnc_id": hgnc_id})
-
-# 4. Cross-database navigation
-ensembl_id = gene.cross_references.ensembl_gene
-ensembl_gene = await call_tool("ensembl_get_gene", {"ensembl_id": ensembl_id})
-
-# 5. Protein lookup
-if gene.cross_references.uniprot:
-    uniprot_id = f"UniProtKB:{gene.cross_references.uniprot[0]}"
-    protein = await call_tool("uniprot_get_protein", {"uniprot_id": uniprot_id})
-```
-
-**Best Practices:**
-- Use prefixed tool names to avoid conflicts
-- Follow Fuzzy-to-Fact: search → get → cross-reference
-- Handle ErrorEnvelopes at each step
-- Use slim mode for exploratory searches
-- Batch operations where available (chembl_get_compounds_batch)
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `{id}` | string | Yes | - | CURIE identifier (e.g., `HGNC:1100`) |
+| `slim` | boolean | No | false | Exclude large fields |
 
 ---
 
-### HGNC Server
+### HGNC Tools
 
-**File**: `src/lifesciences_mcp/servers/hgnc.py`
+#### `hgnc_search_genes`
 
-#### Description
-HGNC MCP server providing gene resolution using the Fuzzy-to-Fact protocol.
-
-#### Tools
-
-##### search_genes
-```python
-async def search_genes(
-    query: str,
-    slim: bool = False,
-    cursor: str | None = None,
-    page_size: int = 50,
-) -> PaginationEnvelope[SearchCandidate] | ErrorEnvelope
-```
-
-Fuzzy search for genes by name, symbol, synonym, or description.
+**Server**: `hgnc.py`
+**Description**: Fuzzy search for human genes in HGNC database
 
 **Parameters:**
-- `query` (str): Search term (minimum 2 characters)
-- `slim` (bool): Return minimal fields (~20 tokens per entity)
-- `cursor` (str | None): Opaque pagination cursor
-- `page_size` (int): Results per page (1-100, default: 50)
+- `query` (string, required): Gene symbol, name, alias, or natural language
+- `slim` (boolean, optional): Return minimal fields (default: false)
+- `cursor` (string, optional): Pagination cursor
+- `page_size` (integer, optional): Results per page (1-100, default: 50)
 
-**Example:**
-```python
-# Via MCP tool call
-result = await call_tool("search_genes", {
-    "query": "BRCA1",
-    "page_size": 10
-})
-
-for candidate in result.items:
-    print(f"{candidate.symbol}: {candidate.score}")
-```
-
-##### get_gene
-```python
-async def get_gene(hgnc_id: str) -> Gene | ErrorEnvelope
-```
-
-Get complete gene record by HGNC CURIE.
-
-**Parameters:**
-- `hgnc_id` (str): HGNC CURIE (format: 'HGNC:NNNNN')
-
-**Example:**
-```python
-# Via MCP tool call
-gene = await call_tool("get_gene", {"hgnc_id": "HGNC:1100"})
-
-if not gene.error:
-    print(f"Symbol: {gene.symbol}")
-    print(f"Ensembl: {gene.cross_references.ensembl_gene}")
-```
-
-#### Configuration
-
-```python
-# Run standalone
-uv run fastmcp run src/lifesciences_mcp/servers/hgnc.py
-```
-
----
-
-## Orchestration APIs
-
-High-level utilities for multi-database search and aggregation.
-
-### UnifiedSearch
-
-**File**: `src/lifesciences_agent/aggregator.py`
-
-#### Description
-Experimental aggregator for resolving biological entities across multiple databases. Orchestrates queries across HGNC, UniProt, and Open Targets with intelligent re-ranking.
+**Returns**: `PaginationEnvelope[SearchCandidate]` or `ErrorEnvelope`
 
 **Features:**
-- Multi-database search aggregation
-- Alias-aware boosting (e.g., "p53" → "TP53")
-- Exact symbol match prioritization
-- Configurable result limits
+- Alias boosting (aliases get score=1.0)
+- Position-based scoring for non-exact matches
+- Ambiguity detection (>100 results with <3 char query)
 
-#### Constructor
-```python
-def __init__(self)
+**Example Request:**
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "1",
+  "method": "tools/call",
+  "params": {
+    "name": "hgnc_search_genes",
+    "arguments": {
+      "query": "BRCA1",
+      "page_size": 5
+    }
+  }
+}
 ```
 
-Creates client instances for HGNC, UniProt, and Open Targets.
+#### `hgnc_get_gene`
 
-#### Methods
-
-##### search()
-```python
-async def search(
-    self,
-    query: str,
-    limit: int = 10
-) -> PaginationEnvelope[SearchCandidate]
-```
-
-Search across multiple databases and re-rank results.
+**Description**: Get complete gene record by HGNC CURIE
 
 **Parameters:**
-- `query` (str): Search term
-- `limit` (int): Maximum results to return (default: 10)
+- `hgnc_id` (string, required): HGNC CURIE (format: `HGNC:NNNNN`)
 
-**Returns:**
-- `PaginationEnvelope[SearchCandidate]`: Re-ranked search results from all databases
+**Returns**: `Gene` or `ErrorEnvelope`
 
-**Example:**
-```python
-from lifesciences_agent.aggregator import UnifiedSearch
+**Validation**: Enforces CURIE format (rejects raw gene symbols)
 
-# Create aggregator
-searcher = UnifiedSearch()
-
-# Search across databases
-result = await searcher.search("p53", limit=5)
-
-for candidate in result.items:
-    print(f"{candidate.symbol}: {candidate.score}")
-    # Expected: TP53 appears first due to alias boosting
-
-# Close clients
-await searcher.hgnc.close()
-await searcher.uniprot.close()
-await searcher.opentargets.close()
-```
-
-**Re-ranking Logic:**
-1. Collects results from HGNC (extensible to other sources)
-2. Applies boosting heuristics:
-   - Exact symbol match: +2.0 score boost
-   - Known alias match (e.g., "p53" → "TP53"): +2.0 boost
-3. Sorts by boosted score descending
-4. Returns top N results
-
-**Best Practices:**
-- Use for ambiguous queries where single-database search may miss results
-- Consider cross-database ID mapping for comprehensive coverage
-- Experimental: may change in future versions
+**See Also**: [HGNCClient](#hgnc-client), [Gene model](#gene-models)
 
 ---
 
-## Utility Functions and Helpers
+### UniProt Tools
 
-### Cross-Reference Utilities
+#### `uniprot_search_proteins`
 
-Cross-reference mapping is built into client classes:
+**Description**: Search for proteins with optional organism filtering
 
-**HGNCClient._build_cross_references()**
-- Maps HGNC response fields to CrossReferences model
-- Omits keys with no value
-- Handles OMIM list format
+**Parameters:**
+- `query` (string, required): Protein name, gene symbol, or accession
+- `organism` (string, optional): Scientific name (e.g., "Homo sapiens")
+- `slim` (boolean, optional): Return minimal fields
+- `cursor` (string, optional): Pagination cursor
+- `page_size` (integer, optional): Results per page (1-500)
 
-**UniProtClient._map_cross_references()**
-- Maps UniProt xrefs to 22-key registry
-- Limits PDB structures to first 10
-- Normalizes CURIE formats
+**Returns**: `PaginationEnvelope[ProteinSearchCandidate]` or `ErrorEnvelope`
 
-**EnsemblClient._map_cross_references()**
-- Maps Ensembl xrefs to EnsemblCrossReferences model
-- Handles RefSeq, UniProt, PDB, KEGG, ChEMBL
-- Applies CURIE prefixes where needed
+#### `uniprot_get_protein`
 
-**ChEMBLClient._build_cross_references()**
-- Maps ChEMBL cross_references array to registry
-- Normalizes DrugBank, UniProt, PDB formats
-- Omits unmapped sources
+**Description**: Get protein record by UniProt accession
 
-**OpenTargetsClient._build_cross_references()**
-- Maps GraphQL dbXrefs to CrossReferences
-- Applies CURIE normalization per source
-- Handles Open Targets specific formats
+**Parameters:**
+- `uniprot_id` (string, required): UniProt accession or CURIE
+- `slim` (boolean, optional): Exclude large text fields
+
+**Returns**: `Protein` or `ErrorEnvelope`
 
 ---
 
-### Error Handling
+### ChEMBL Tools
 
-All clients use consistent error handling patterns:
+#### `chembl_search_compounds`
 
-**Rate Limiting:**
-- Exponential backoff on 429/403/503 errors
-- Respects Retry-After header when present
-- Thundering herd prevention (re-check timing after lock)
-- Maximum retry attempts: 3 (configurable per client)
+**Description**: Search for chemical compounds
 
-**Network Errors:**
-- Timeout errors return UPSTREAM_ERROR
-- Connection errors return UPSTREAM_ERROR with recovery hint
-- All httpx exceptions wrapped in ErrorEnvelope
+**Parameters:**
+- `query` (string, required): Compound name, synonym, or identifier
+- `slim` (boolean, optional): Return minimal fields (~20 tokens)
+- Standard pagination parameters
 
-**Validation Errors:**
-- CURIE format validation before API calls
-- Returns UNRESOLVED_ENTITY for invalid format
-- Query length validation (minimum 2 characters)
+**Returns**: `PaginationEnvelope[CompoundSearchCandidate]` or `ErrorEnvelope`
 
-**Error Mapping:**
-- 404 → ENTITY_NOT_FOUND
-- 429/403 → RATE_LIMITED
-- 400 → AMBIGUOUS_QUERY or UNRESOLVED_ENTITY
-- 5xx → UPSTREAM_ERROR
+#### `chembl_get_compound`
 
-**Example Error Handling:**
-```python
-from lifesciences_mcp.clients import HGNCClient
-from lifesciences_mcp.models import ErrorEnvelope, ErrorCode
+**Description**: Get compound record by ChEMBL CURIE
 
-async with HGNCClient() as client:
-    result = await client.get_gene("invalid-format")
+**Parameters:**
+- `chembl_id` (string, required): ChEMBL CURIE (format: `CHEMBL:NNNNN`)
+- `slim` (boolean, optional): Exclude drug indications
 
-    if isinstance(result, ErrorEnvelope):
-        if result.error.code == ErrorCode.UNRESOLVED_ENTITY:
-            # Try search instead
-            print(f"Invalid CURIE: {result.error.invalid_input}")
-            print(f"Recovery: {result.error.recovery_hint}")
+**Returns**: `dict[str, Any]` or `ErrorEnvelope`
 
-            search_result = await client.search_genes(result.error.invalid_input)
-            if search_result.items:
-                # Retry with resolved CURIE
-                gene = await client.get_gene(search_result.items[0].id)
+#### `chembl_get_compounds_batch`
 
-        elif result.error.code == ErrorCode.RATE_LIMITED:
-            # Wait and retry
-            retry_after = 60  # default
-            if "Wait" in result.error.recovery_hint:
-                # Parse retry time from hint
-                pass
-            await asyncio.sleep(retry_after)
-```
+**Description**: Batch retrieve up to 100 compounds
+
+**Parameters:**
+- `chembl_ids` (array[string], required): List of ChEMBL CURIEs (max 100)
+- `slim` (boolean, optional): Exclude indications (default: true)
+
+**Returns**: `list[dict[str, Any]]` or `ErrorEnvelope`
+
+**Performance**: ~10x faster than individual requests for large batches
 
 ---
 
-## Configuration Reference
+### STRING Tools
+
+#### `string_search_proteins`
+
+**Description**: Search for proteins to get STRING IDs
+
+**Parameters:**
+- `query` (string, required): Protein name or gene symbol
+- `limit` (integer, optional): Max results (default: 10)
+
+**Returns**: `PaginationEnvelope[InteractionSearchCandidate]` or `ErrorEnvelope`
+
+#### `string_get_interactions`
+
+**Description**: Get protein-protein interaction network
+
+**Parameters:**
+- `string_id` (string, required): STRING protein ID (format: `9606.ENSP00000269305`)
+- `score_threshold` (integer, optional): Min confidence (0-1000, default: 400)
+- `limit` (integer, optional): Max interactions (default: 100)
+
+**Returns**: `InteractionNetwork` or `ErrorEnvelope`
+
+**Score Thresholds:**
+- 150: Low confidence
+- 400: Medium confidence (default)
+- 700: High confidence
+- 900: Highest confidence
+
+#### `string_get_network_image_url`
+
+**Description**: Get URL to network visualization
+
+**Parameters:**
+- `string_ids` (array[string], required): List of STRING IDs
+- `network_flavor` (string, optional): Visualization type (default: "evidence")
+
+**Returns**: `string` (URL)
+
+---
+
+### WikiPathways Tools
+
+#### `wikipathways_search_pathways`
+
+**Description**: Search for biological pathways
+
+**Parameters:**
+- `query` (string, required): Pathway name or gene symbol
+- `organism` (string, optional): Organism name (default: "Homo sapiens")
+- Standard pagination parameters
+
+**Returns**: `PaginationEnvelope[PathwaySearchCandidate]` or `ErrorEnvelope`
+
+#### `wikipathways_get_pathway`
+
+**Description**: Get pathway details by WikiPathways ID
+
+**Parameters:**
+- `pathway_id` (string, required): WikiPathways ID (e.g., `WP:254`)
+
+**Returns**: `Pathway` or `ErrorEnvelope`
+
+#### `wikipathways_get_pathways_for_gene`
+
+**Description**: Find pathways containing a specific gene
+
+**Parameters:**
+- `gene_symbol` (string, required): Gene symbol (e.g., "TP53")
+- `organism` (string, optional): Organism (default: "Homo sapiens")
+
+**Returns**: `PaginationEnvelope[PathwaySearchCandidate]` or `ErrorEnvelope`
+
+#### `wikipathways_get_pathway_components`
+
+**Description**: Get detailed pathway components (genes, metabolites, interactions)
+
+**Parameters:**
+- `pathway_id` (string, required): WikiPathways ID
+
+**Returns**: `PathwayComponents` or `ErrorEnvelope`
+
+---
+
+### Other Tool Groups
+
+#### Open Targets Tools
+- `opentargets_search_targets`: Search therapeutic targets
+- `opentargets_get_target`: Get target details
+- `opentargets_get_associations`: Get target-disease associations
+
+#### Ensembl Tools
+- `ensembl_search_genes`: Search genes by symbol or name
+- `ensembl_get_gene`: Get gene by Ensembl ID
+- `ensembl_get_transcript`: Get transcript details
+
+#### Entrez Tools
+- `entrez_search_genes`: Search NCBI Gene database
+- `entrez_get_gene`: Get gene by Entrez ID
+- `entrez_get_pubmed_links`: Get PubMed references for gene
+
+#### BioGRID Tools
+- `biogrid_search_genes`: Search for genes
+- `biogrid_get_interactions`: Get genetic and protein interactions
+
+#### PubChem Tools
+- `pubchem_search_compounds`: Search chemical compounds
+- `pubchem_get_compound`: Get compound by PubChem CID
+
+#### IUPHAR Tools
+- `iuphar_search_ligands`: Search pharmacological ligands
+- `iuphar_get_ligand`: Get ligand details
+- `iuphar_search_targets`: Search drug targets
+- `iuphar_get_target`: Get target details
+
+#### ClinicalTrials Tools
+- `clinicaltrials_search_trials`: Search clinical trials
+- `clinicaltrials_get_trial`: Get trial details by NCT number
+- `clinicaltrials_get_trial_locations`: Get trial site locations
+
+---
+
+## Configuration
 
 ### Environment Variables
 
-Currently, the system does not require environment variables for most APIs. Future implementations may add:
+#### API Keys (Optional/Required)
 
-- `HGNC_API_KEY`: Optional API key for higher rate limits
-- `CHEMBL_API_KEY`: Optional API key (not currently required)
-- `DRUGBANK_API_KEY`: Required for DrugBank access (not implemented)
-- `LOG_LEVEL`: Logging verbosity (DEBUG, INFO, WARNING, ERROR)
+```bash
+# Optional but recommended (increases rate limit)
+NCBI_API_KEY=your_ncbi_api_key
 
-### Rate Limiting Configuration
+# Required for BioGRID
+BIOGRID_API_KEY=your_biogrid_api_key
 
-Each client has built-in rate limiting:
-
-**HGNC:**
-- Rate: 10 requests/second
-- Delay: 100ms between requests
-- Constant: `RATE_LIMIT_DELAY = 0.1`
-
-**UniProt:**
-- Rate: 10 requests/second (conservative)
-- Delay: 100ms between requests
-- Constant: `RATE_LIMIT_DELAY = 0.1`
-
-**Ensembl:**
-- Rate: 15 requests/second
-- Delay: 66.67ms between requests
-- Constant: `RATE_LIMIT_DELAY = 1.0 / 15`
-
-**ChEMBL:**
-- Rate: 10 requests/second
-- Delay: 100ms between requests
-- Constants: `RATE_LIMIT_REQUESTS = 10`, `RATE_LIMIT_PERIOD = 1.0`
-
-**Open Targets:**
-- Rate: 10 requests/second
-- Delay: 100ms between requests
-- Constant: `RATE_LIMIT_DELAY = 0.1`
-
-**Customization:**
-Rate limits are defined as class constants and can be modified by subclassing (not recommended - may violate API terms).
-
-### Pagination Configuration
-
-**Default Page Sizes:**
-- HGNC: 50 (range: 1-100)
-- UniProt: 50 (range: 1-500)
-- Ensembl: 50 (range: 1-100)
-- ChEMBL: 50 (range: 1-100)
-- Open Targets: 50 (range: 1-100)
-
-**Cursor Formats:**
-- HGNC: Base64 JSON with offset (`{"offset": 50}`)
-- UniProt: Server-provided opaque cursor
-- Ensembl: Base64 JSON with offset
-- ChEMBL: Base64 JSON with offset
-- Open Targets: Base64 JSON with index and size
-
-**Example Pagination:**
-```python
-async with HGNCClient() as client:
-    # First page
-    result = await client.search_genes("kinase", page_size=25)
-    all_results = list(result.items)
-
-    # Subsequent pages
-    cursor = result.pagination.cursor
-    while cursor:
-        result = await client.search_genes("kinase", page_size=25, cursor=cursor)
-        all_results.extend(result.items)
-        cursor = result.pagination.cursor
-
-    print(f"Total results: {len(all_results)}")
+# Required for DrugBank (commercial)
+DRUGBANK_API_KEY=your_drugbank_api_key
 ```
 
----
+#### Rate Limiting (Custom Overrides)
 
-## Usage Patterns and Best Practices
+```bash
+# Override default rate limits (requests per second)
+HGNC_RATE_LIMIT=10
+UNIPROT_RATE_LIMIT=10
+CHEMBL_RATE_LIMIT=10
+STRING_RATE_LIMIT=1
+PUBCHEM_RATE_LIMIT=5
+```
 
-### Pattern 1: Fuzzy-to-Fact Search
+#### Connection Pooling
 
-The canonical workflow for resolving biological entities:
+```bash
+# Max concurrent connections per client
+HTTPX_MAX_CONNECTIONS=10
+
+# Keep-alive connection pool size
+HTTPX_MAX_KEEPALIVE_CONNECTIONS=10
+```
+
+#### Timeouts
+
+```bash
+# Request timeout in seconds
+HTTPX_CONNECT_TIMEOUT=5.0
+HTTPX_READ_TIMEOUT=30.0
+HTTPX_WRITE_TIMEOUT=10.0
+HTTPX_POOL_TIMEOUT=5.0
+```
+
+### Loading Environment Variables
+
+```python
+from dotenv import load_dotenv
+load_dotenv()  # Load from .env file
+```
+
+### Client Configuration
 
 ```python
 from lifesciences_mcp.clients import HGNCClient
 
-async with HGNCClient() as client:
-    # Phase 1: Fuzzy search
-    search_result = await client.search_genes("BRCA")
+# Use defaults
+client = HGNCClient()
 
-    # Validate and select candidate
-    if search_result.items:
-        top_candidate = search_result.items[0]
-        print(f"Top match: {top_candidate.symbol} (score: {top_candidate.score})")
+# Custom configuration (advanced)
+from lifesciences_mcp.clients.base import LifeSciencesClient
 
-        # Phase 2: Fact retrieval with CURIE
-        gene = await client.get_gene(top_candidate.id)
-
-        if isinstance(gene, Gene):
-            print(f"Confirmed: {gene.symbol} - {gene.name}")
-            print(f"Location: {gene.location}")
+custom_client = LifeSciencesClient(
+    base_url="https://custom.api.url",
+    timeout=60.0,
+    max_connections=20
+)
 ```
 
-**When to Use:**
-- User provides ambiguous input (gene name, partial symbol)
-- Need to validate existence before detailed lookup
-- Want ranked alternatives for disambiguation
+---
 
-**Anti-pattern:**
-- Skipping search and guessing CURIE format
-- Using get_* methods with user-provided strings
+## Usage Patterns
+
+### Pattern 1: Fuzzy-to-Fact Workflow
+
+The recommended workflow for entity resolution.
+
+```python
+from lifesciences_mcp import HGNCClient, ErrorEnvelope
+
+async with HGNCClient() as client:
+    # Step 1: Fuzzy search (user input)
+    results = await client.search_genes("breast cancer 1")
+
+    if isinstance(results, ErrorEnvelope):
+        print(f"Error: {results.error.recovery_hint}")
+        return
+
+    # Step 2: User selects best match
+    top_match = results.items[0]
+    print(f"Selected: {top_match.symbol} (score: {top_match.score})")
+
+    # Step 3: Strict lookup (authoritative data)
+    gene = await client.get_gene(top_match.id)
+
+    if not isinstance(gene, ErrorEnvelope):
+        print(f"Location: {gene.location}")
+        print(f"Status: {gene.status}")
+```
 
 ### Pattern 2: Cross-Database Navigation
 
-Leverage cross-references to navigate between databases:
+Use cross-references to navigate between databases.
 
 ```python
-from lifesciences_mcp.clients import HGNCClient, UniProtClient, EnsemblClient
+from lifesciences_mcp import HGNCClient, UniProtClient, STRINGClient
 
-async with HGNCClient() as hgnc, \
-           UniProtClient() as uniprot, \
-           EnsemblClient() as ensembl:
-
-    # Start with gene
-    gene = await hgnc.get_gene("HGNC:11998")
-
-    # Navigate to Ensembl
-    if gene.cross_references.ensembl_gene:
-        ensembl_gene = await ensembl.get_gene(
-            gene.cross_references.ensembl_gene
-        )
-        print(f"Transcripts: {len(ensembl_gene.transcripts or [])}")
+# Start with gene symbol
+async with HGNCClient() as hgnc:
+    genes = await hgnc.search_genes("TP53")
+    gene = await hgnc.get_gene(genes.items[0].id)
 
     # Navigate to UniProt
-    if gene.cross_references.uniprot:
-        uniprot_id = f"UniProtKB:{gene.cross_references.uniprot[0]}"
-        protein = await uniprot.get_protein(uniprot_id)
-        print(f"Protein: {protein.name}")
-        print(f"Function: {protein.function}")
+    uniprot_id = gene.cross_references.uniprot[0]
 
-        # Navigate to PDB structures
-        if protein.cross_references.pdb:
-            print(f"Structures: {', '.join(protein.cross_references.pdb[:5])}")
+async with UniProtClient() as uniprot:
+    protein = await uniprot.get_protein(uniprot_id)
+
+    # Navigate to STRING (use gene symbol)
+    async with STRINGClient() as string:
+        proteins = await string.search_proteins(gene.symbol)
+        network = await string.get_interactions(proteins.items[0].id)
+
+        print(f"Found {len(network.interactions)} interactions")
 ```
 
-**When to Use:**
-- Need comprehensive entity information
-- Building knowledge graphs
-- Validating cross-database consistency
+### Pattern 3: Pagination
 
-**Best Practices:**
-- Check cross_reference existence before navigation
-- Handle ErrorEnvelopes at each step
-- Use slim mode for intermediate lookups
-
-### Pattern 3: Batch Operations
-
-Efficient retrieval of multiple entities:
+Handle large result sets with cursor-based pagination.
 
 ```python
-from lifesciences_mcp.clients import ChEMBLClient
+from lifesciences_mcp import HGNCClient
 
-client = ChEMBLClient()
+async with HGNCClient() as client:
+    cursor = None
+    all_results = []
 
-try:
-    # Search to get CURIEs
-    search_result = await client.search_compounds("kinase inhibitor", page_size=20)
+    # Fetch first 3 pages
+    for page_num in range(3):
+        results = await client.search_genes("kinase", cursor=cursor, page_size=50)
 
-    # Extract CURIEs
-    chembl_ids = [c.id for c in search_result.items[:10]]
+        if isinstance(results, ErrorEnvelope):
+            break
 
-    # Batch lookup (max 100)
-    compounds = await client.get_compounds_batch(chembl_ids, slim=True)
+        all_results.extend(results.items)
+        cursor = results.pagination.cursor
 
-    # Process results
-    for compound in compounds:
-        if 'error' not in compound:
-            print(f"{compound['name']}: Phase {compound.get('max_phase', 'N/A')}")
-        else:
-            print(f"Error: {compound['error']['message']}")
+        if cursor is None:  # No more pages
+            break
 
-finally:
-    await client.close()
+        print(f"Page {page_num + 1}: {len(results.items)} results")
+
+    print(f"Total: {len(all_results)} results")
 ```
 
-**When to Use:**
-- Retrieving multiple related entities
-- Building comparison tables
-- Bulk data extraction
+### Pattern 4: Error Handling
 
-**Best Practices:**
-- Respect batch size limits (100 for ChEMBL)
-- Use slim mode to reduce token usage
-- Handle individual failures within batch
-- Consider rate limiting for large batches
-
-### Pattern 4: Error Recovery
-
-Robust error handling with automatic recovery:
+Use recovery hints for agent self-correction.
 
 ```python
-from lifesciences_mcp.clients import HGNCClient
-from lifesciences_mcp.models import ErrorEnvelope, ErrorCode
-import asyncio
+from lifesciences_mcp import HGNCClient, ErrorEnvelope
+from lifesciences_mcp.models.envelopes import ErrorCode
 
-async def resilient_gene_lookup(query: str, max_retries: int = 3) -> Gene | None:
-    """Lookup gene with automatic error recovery."""
-    async with HGNCClient() as client:
-        # Try search first
-        search_result = await client.search_genes(query)
+async with HGNCClient() as client:
+    result = await client.get_gene("BRCA1")  # Wrong: should be CURIE
 
-        if isinstance(search_result, ErrorEnvelope):
-            if search_result.error.code == ErrorCode.AMBIGUOUS_QUERY:
-                # Query too broad, refine
-                print(f"Refining query: {query}")
-                search_result = await client.search_genes(f"{query} homo sapiens")
-            elif search_result.error.code == ErrorCode.RATE_LIMITED:
-                # Wait and retry
-                await asyncio.sleep(60)
-                search_result = await client.search_genes(query)
-            else:
-                print(f"Search failed: {search_result.error.message}")
-                return None
+    if isinstance(result, ErrorEnvelope):
+        if result.error.code == ErrorCode.UNRESOLVED_ENTITY:
+            # Agent learns: need to search first
+            print(f"Recovery: {result.error.recovery_hint}")
 
-        # Get top candidate
-        if not search_result.items:
-            print("No results found")
-            return None
-
-        candidate = search_result.items[0]
-
-        # Retry get_gene with backoff
-        for attempt in range(max_retries):
-            gene = await client.get_gene(candidate.id)
-
-            if isinstance(gene, Gene):
-                return gene
-
-            if gene.error.code == ErrorCode.RATE_LIMITED:
-                wait_time = 2 ** attempt
-                print(f"Rate limited, waiting {wait_time}s...")
-                await asyncio.sleep(wait_time)
-            else:
-                print(f"Lookup failed: {gene.error.message}")
-                return None
-
-        return None
-
-# Usage
-gene = await resilient_gene_lookup("BRCA1")
-if gene:
-    print(f"Found: {gene.symbol}")
+            # Try correct approach
+            search = await client.search_genes("BRCA1")
+            if not isinstance(search, ErrorEnvelope):
+                gene = await client.get_gene(search.items[0].id)
 ```
 
-**When to Use:**
-- Production systems requiring reliability
-- Automated workflows
-- Handling unpredictable user input
+### Pattern 5: Batch Operations
 
-**Best Practices:**
-- Always check for ErrorEnvelope
-- Use error.recovery_hint for guidance
-- Implement exponential backoff for rate limiting
-- Log errors for debugging
-- Set maximum retry limits
+Optimize performance for multiple entities.
+
+```python
+from lifesciences_mcp import ChEMBLClient
+
+async with ChEMBLClient() as client:
+    # Search for multiple compounds
+    compound_ids = []
+    for name in ["aspirin", "ibuprofen", "paracetamol"]:
+        results = await client.search_compounds(name, page_size=1)
+        if not isinstance(results, ErrorEnvelope):
+            compound_ids.append(results.items[0].id)
+
+    # Batch retrieve (much faster)
+    compounds = await client.get_compounds_batch(compound_ids, slim=True)
+
+    if not isinstance(compounds, ErrorEnvelope):
+        for compound in compounds:
+            print(f"{compound['name']}: {compound['molecular_formula']}")
+```
+
+### Pattern 6: Slim Mode for Token Efficiency
+
+Reduce token usage by ~80%.
+
+```python
+from lifesciences_mcp import HGNCClient
+
+async with HGNCClient() as client:
+    # Regular mode: ~115-300 tokens per gene
+    gene_full = await client.get_gene("HGNC:1100")
+
+    # Slim mode: ~20 tokens per gene
+    search_results = await client.search_genes("BRCA1", slim=True, page_size=10)
+
+    # Use slim for large result sets
+    # Use full for detailed analysis
+```
 
 ---
 
-## Appendix
+## Best Practices
 
-### Type Definitions
-
-Common types used across the API:
+### 1. Always Use Context Managers
+- Ensures proper connection cleanup
+- Prevents resource leaks
+- Handles exceptions gracefully
 
 ```python
-# Generic pagination type
-T = TypeVar("T")
-PaginationEnvelope[T]
+# Good
+async with HGNCClient() as client:
+    result = await client.search_genes("TP53")
 
-# Union types for responses
-SearchResult = PaginationEnvelope[SearchCandidate] | ErrorEnvelope
-GeneResult = Gene | ErrorEnvelope
-ProteinResult = Protein | ErrorEnvelope
-
-# Cross-reference types
-CrossRefValue = str | list[str] | None
+# Bad (manual cleanup required)
+client = HGNCClient()
+result = await client.search_genes("TP53")
+await client.close()  # Easy to forget
 ```
 
-### Error Codes
+### 2. Prefer Strict Lookups for Facts
+- Use fuzzy search for discovery
+- Use strict lookups for authoritative data
+- Never skip CURIE validation
 
-Complete error code reference with descriptions and recovery strategies:
+### 3. Use Slim Mode for Large Results
+- Default mode: ~100+ tokens per entity
+- Slim mode: ~20 tokens per entity
+- Use slim for pagination, full for analysis
 
-| Code | Description | Recovery Strategy |
-|------|-------------|-------------------|
-| `UNRESOLVED_ENTITY` | Invalid CURIE format or raw string passed to strict lookup | Call search tool to resolve identifier to valid CURIE |
-| `ENTITY_NOT_FOUND` | Valid CURIE but entity not found in database | Verify CURIE spelling, try alternate database, or search for synonyms |
-| `AMBIGUOUS_QUERY` | Query too broad (>100 results) or too short (<2 chars) | Add more specific terms, use exact symbols, or filter by organism/type |
-| `RATE_LIMITED` | Too many requests to upstream API | Wait specified time (check recovery_hint), implement exponential backoff |
-| `UPSTREAM_ERROR` | External API failure (timeout, 5xx error, network issue) | Retry after delay, check API status page, try alternate data source |
-| `INVALID_CROSS_REFERENCE` | Cross-reference ID format invalid | Verify ID format, check source database documentation |
+### 4. Cache Identifiers, Not Data
+- Cache CURIEs for fast lookup
+- Don't cache full records (data changes)
+- Cross-references enable navigation
 
-**Example Error Message Formats:**
+### 5. Handle Rate Limits Gracefully
+- Clients enforce rate limits automatically
+- Exponential backoff on 429 errors
+- Retry after delay from Retry-After header
 
-```json
-{
-  "success": false,
-  "error": {
-    "code": "UNRESOLVED_ENTITY",
-    "message": "The input 'brca1' is not a valid HGNC CURIE.",
-    "recovery_hint": "Call search_genes to resolve the identifier first.",
-    "invalid_input": "brca1"
-  }
-}
-```
+### 6. Validate CURIEs Before Lookup
+- Use CURIE format for strict tools
+- Fuzzy search returns validated CURIEs
+- Invalid CURIEs return UNRESOLVED_ENTITY error
 
-```json
-{
-  "success": false,
-  "error": {
-    "code": "RATE_LIMITED",
-    "message": "HGNC API rate limit exceeded.",
-    "recovery_hint": "Retry after 60 seconds.",
-    "invalid_input": null
-  }
-}
-```
+### 7. Use Cross-References for Integration
+- Navigate between databases via cross-refs
+- Check if cross-reference exists before use
+- Handle None values gracefully
 
-### Common CURIE Formats
+### 8. Implement Pagination for Large Datasets
+- Use cursor-based pagination
+- Don't fetch all results at once
+- Respect page_size limits
 
-Reference for valid CURIE formats across databases:
+### 9. Monitor and Log API Errors
+- Check for ErrorEnvelope in responses
+- Log recovery hints for debugging
+- Track rate limit errors
 
-| Database | Format | Pattern | Example |
+### 10. Test with Real and Edge Case Data
+- Test with valid and invalid CURIEs
+- Test with ambiguous queries
+- Test with empty results
+
+### 11. Respect Upstream API Terms
+- HGNC: 10 req/s
+- STRING: 1 req/s (strict)
+- BioGRID: Free API key required
+- DrugBank: Commercial license required
+
+### 12. Use Organism Filtering
+- Speeds up protein searches
+- Reduces ambiguous results
+- Default: all organisms
+
+### 13. Understand Token Costs
+- SearchCandidate: ~20 tokens
+- Full Gene: ~115-300 tokens
+- Compound with indications: ~100+ tokens
+- InteractionNetwork: ~50+ tokens per interaction
+
+### 14. Handle Optional Cross-References
+- Cross-references may be None
+- Check existence before use
+- Use `model_dump(exclude_none=True)` to omit
+
+### 15. Leverage Evidence Scores
+- STRING: combined_score (0-1000)
+- Open Targets: association score (0.0-1.0)
+- Use thresholds for filtering
+
+---
+
+## Appendices
+
+### Appendix A: CURIE Formats
+
+All databases use CURIE (Compact URI) format for identifiers.
+
+| Database | Format | Example | Pattern |
 |----------|--------|---------|---------|
-| HGNC | HGNC:NNNNN | `^HGNC:\d+$` | HGNC:1100 |
-| UniProt | UniProtKB:XXXXXX | `^UniProtKB:[A-Z][A-Z0-9]{5,9}$` | UniProtKB:P04637 |
-| Ensembl Gene | ENSGXXXXXXXXXXX | `^ENSG\d{11}$` | ENSG00000141510 |
-| Ensembl Transcript | ENSTXXXXXXXXXXX | `^ENST\d{11}$` | ENST00000269305 |
-| ChEMBL | CHEMBL:NNNNN | `^CHEMBL:[0-9]+$` | CHEMBL:25 |
-| Entrez | Raw number | `^\d+$` | 7157 |
-| OMIM | NNNNNN | `^\d{6}$` | 191170 |
-| RefSeq | NM_NNNNNN | `^[NX][MR]_\d+$` | NM_000546 |
-| PDB | 1ABC | `^[0-9][A-Z0-9]{3}$` | 1TUP |
+| HGNC | `HGNC:NNNNN` | `HGNC:1100` | `^HGNC:\d+$` |
+| UniProt | `UniProtKB:XXXXXX` | `UniProtKB:P04637` | `^UniProtKB:[A-Z][A-Z0-9]{5,9}$` |
+| ChEMBL | `CHEMBL:NNNNN` | `CHEMBL:25` | `^CHEMBL:[0-9]+$` |
+| Ensembl Gene | `ENSG...` | `ENSG00000012048` | `^ENSG\d{11}$` |
+| Ensembl Transcript | `ENST...` | `ENST00000471181` | `^ENST\d{11}$` |
+| Entrez | `NCBIGene:NNNNN` | `NCBIGene:7157` | `^NCBIGene:\d+$` |
+| PubChem | `CID:NNNNN` | `CID:2244` | `^CID:\d+$` |
+| STRING | `9606.ENSP...` | `9606.ENSP00000269305` | `^9606\.[A-Z0-9]+$` |
+| WikiPathways | `WP:NNNNN` | `WP:254` | `^WP:\d+$` |
+| ClinicalTrials | `NCT...` | `NCT03997058` | `^NCT\d{8}$` |
+| IUPHAR | `IUPHAR:NNNNN` | `IUPHAR:5239` | `^IUPHAR:\d+$` |
+| DrugBank | `DB:NNNNN` | `DB01050` | `^DB\d{5}$` |
 
-### Source File Reference
+### Appendix B: Cross-Reference Registry
 
-Complete mapping of files to APIs:
+The 22-key cross-reference registry (defined in `gene.py`).
 
-**Client Files:**
-- `src/lifesciences_mcp/clients/base.py`: LifeSciencesClient base class
-- `src/lifesciences_mcp/clients/hgnc.py`: HGNCClient
-- `src/lifesciences_mcp/clients/uniprot.py`: UniProtClient
-- `src/lifesciences_mcp/clients/ensembl.py`: EnsemblClient
-- `src/lifesciences_mcp/clients/chembl.py`: ChEMBLClient
-- `src/lifesciences_mcp/clients/opentargets.py`: OpenTargetsClient
+**Core (6 keys):**
+- ensembl_gene, ensembl_transcript, uniprot, entrez, refseq, hgnc
 
-**Model Files:**
-- `src/lifesciences_mcp/models/gene.py`: Gene, SearchCandidate, CrossReferences
-- `src/lifesciences_mcp/models/protein.py`: Protein, ProteinSearchCandidate
-- `src/lifesciences_mcp/models/compound.py`: Compound, CompoundSearchCandidate
-- `src/lifesciences_mcp/models/target.py`: Target, TargetSearchCandidate, Association
-- `src/lifesciences_mcp/models/ensembl.py`: EnsemblGene, EnsemblTranscript, GeneSearchCandidate
-- `src/lifesciences_mcp/models/envelopes.py`: PaginationEnvelope, ErrorEnvelope, ErrorCode
+**Disease (4 keys):**
+- omim, orphanet, mondo, efo
 
-**Server Files:**
-- `src/lifesciences_mcp/servers/gateway.py`: Gateway server (all databases)
-- `src/lifesciences_mcp/servers/hgnc.py`: HGNC MCP server
+**Drug/Compound (4 keys):**
+- chembl, drugbank, pubchem_compound, pubchem_substance
 
-**Orchestration Files:**
-- `src/lifesciences_agent/aggregator.py`: UnifiedSearch
+**Pathway (2 keys):**
+- kegg, kegg_pathway
+
+**Interaction (4 keys):**
+- string, biogrid, stitch, iuphar
+
+**Structural (1 key):**
+- pdb
+
+**Total: 21 keys** (hgnc is 22nd)
+
+### Appendix C: Error Codes
+
+Standard error codes from ADR-001 Appendix B.
+
+| Code | Description | Recovery Hint |
+|------|-------------|---------------|
+| `UNRESOLVED_ENTITY` | Raw string passed to strict tool | Call search tool first |
+| `ENTITY_NOT_FOUND` | Valid CURIE but no record | Verify format or try synonym search |
+| `AMBIGUOUS_QUERY` | Too many results or too generic | Refine query with specific terms |
+| `RATE_LIMITED` | Upstream API throttling | Retry after delay (check Retry-After) |
+| `UPSTREAM_ERROR` | API failure or network error | Retry later or check API status |
+| `INVALID_CROSS_REFERENCE` | Cross-ref format validation failed | Use search to get valid identifier |
+
+### Appendix D: Rate Limit Defaults
+
+Default rate limits enforced by clients (requests per second).
+
+| API | Rate Limit | Delay (ms) | Notes |
+|-----|------------|------------|-------|
+| HGNC | 10 req/s | 100 | Conservative estimate |
+| UniProt | 10 req/s | 100 | Conservative estimate |
+| ChEMBL | 10 req/s | 100 | SDK wrapper with backoff |
+| Open Targets | 10 req/s | 100 | GraphQL API |
+| STRING | 1 req/s | 1000 | **Strict limit** |
+| BioGRID | 10 req/s | 100 | API key required |
+| Ensembl | 15 req/s | 67 | Auto rate limit headers |
+| Entrez | 3 req/s | 333 | 10 req/s with API key |
+| PubChem | 5 req/s | 200 | Official limit |
+| IUPHAR | 10 req/s | 100 | Conservative estimate |
+| WikiPathways | 10 req/s | 100 | SPARQL + REST |
+| ClinicalTrials | 10 req/s | 100 | API v2 |
+
+### Appendix E: Response Token Sizes
+
+Typical token counts for different query types (GPT-4 tokenizer).
+
+| Entity Type | Slim Mode | Full Mode | Notes |
+|-------------|-----------|-----------|-------|
+| SearchCandidate | ~20 | N/A | id, symbol, name, score only |
+| Gene | N/A | ~115-300 | Depends on cross-references |
+| Protein | N/A | ~150-400 | Includes function, sequence length |
+| Compound | ~30 | ~100-200 | +100 tokens with indications |
+| Interaction | N/A | ~50 | Per interaction in network |
+| Pathway | ~40 | ~100-150 | Depends on description length |
+| Trial | N/A | ~200-500 | Includes eligibility, outcomes |
+| PaginationEnvelope | +10 | +10 | Overhead per response |
+| ErrorEnvelope | ~50 | ~50 | With recovery hint |
+
+### Appendix F: MCP Protocol Primer
+
+**JSON-RPC 2.0 Format:**
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "unique-request-id",
+  "method": "tools/call",
+  "params": {
+    "name": "tool_name",
+    "arguments": { /* tool-specific args */ }
+  }
+}
+```
+
+**Response Format:**
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "matching-request-id",
+  "result": {
+    "content": [{
+      "type": "text",
+      "text": "{ /* JSON serialized result */ }"
+    }]
+  }
+}
+```
+
+**Error Format:**
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "matching-request-id",
+  "error": {
+    "code": -32001,
+    "message": "Error description"
+  }
+}
+```
+
+**Transport**: HTTP POST to `/mcp` endpoint with SSE response
+
+### Appendix G: Source File Locations
+
+Quick reference for implementation files.
+
+**Clients:**
+- Base: `src/lifesciences_mcp/clients/base.py`
+- HGNC: `src/lifesciences_mcp/clients/hgnc.py`
+- UniProt: `src/lifesciences_mcp/clients/uniprot.py`
+- ChEMBL: `src/lifesciences_mcp/clients/chembl.py`
+- [11 more clients...]
+
+**Models:**
+- Envelopes: `src/lifesciences_mcp/models/envelopes.py`
+- Gene: `src/lifesciences_mcp/models/gene.py`
+- Protein: `src/lifesciences_mcp/models/protein.py`
+- Compound: `src/lifesciences_mcp/models/compound.py`
+- [14 more model files...]
+
+**Servers:**
+- Gateway: `src/lifesciences_mcp/servers/gateway.py`
+- HGNC: `src/lifesciences_mcp/servers/hgnc.py`
+- UniProt: `src/lifesciences_mcp/servers/uniprot.py`
+- [11 more servers...]
+
+**Package Entry Point:**
+- `src/lifesciences_mcp/__init__.py`
 
 ---
 
-**Document Version:** 1.0
-**Last Updated:** 2026-01-07
-**API Version:** Based on codebase commit 4308911
+## Related Documentation
+
+- **Component Inventory**: `01_component_inventory.md` - Detailed component breakdown
+- **Architecture Diagrams**: `02_architecture_diagrams.md` - Visual system architecture
+- **Data Flows**: `03_data_flows.md` - Sequence diagrams and interaction patterns
+
+---
+
+## Support & Contributing
+
+**Issues**: Report bugs or request features via GitHub issues
+**Documentation**: This API reference is generated from source code and architecture analysis
+**Updates**: API reference version matches package version (currently 0.1.0)
+
+**Key Design Documents:**
+- ADR-001: Architecture Decision Record for Fuzzy-to-Fact protocol
+- Constitution v1.1.0: Rate limiting and error handling standards
+
+---
+
+*Last Updated: 2026-01-08*
+*Package Version: 0.1.0*
+*Gateway URL: https://lifesciences-research.fastmcp.app/mcp*
