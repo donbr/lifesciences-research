@@ -1,0 +1,14 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+authors:
+- family-names: "Branson"
+  given-names: "Don"
+title: "Life Sciences MCP: FastMCP wrappers for essential life sciences APIs"
+version: 0.1.0
+date-released: 2025-01-01
+url: "https://github.com/donbr/lifesciences-research"
+keywords:
+  - "bioinformatics"
+  - "drug-discovery"
+  - "agentic-ai"
+  - "model-context-protocol"

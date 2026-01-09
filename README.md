@@ -470,6 +470,26 @@ See [docs/test_scenarios.md](docs/test_scenarios.md) for the full list.
 
 ---
 
+## 🧠 Intelligence Included: Pre-Configured Agent Skills
+
+This repository includes a `.claude` directory containing optimized system prompts and skill definitions used to generate our research outputs.
+
+* **[Clinical Trials Skill](.claude/skills/lifesciences-clinical/SKILL.md):** Specialized instructions for navigating ClinicalTrials.gov, filtering by phase/status, and extracting inclusion criteria.
+* **[Genomics Skill](.claude/skills/lifesciences-genomics/SKILL.md):** Best practices for resolving gene symbols to Ensembl/HGNC IDs before querying.
+* **[Graph Builder Skill](.claude/skills/lifesciences-graph-builder/SKILL.md):** Instructions for constructing Neo4j knowledge graphs from unstructured literature.
+
+## 🔬 Research & Validation
+
+We use these tools to perform real-world analysis. All outputs are validated for factual accuracy.
+
+| Study | Description | Validation |
+| :--- | :--- | :--- |
+| **[High Commercialization Trials](docs/research-reports/high-commercialization-trials-research.md)** | Identifying trials with high probability of FDA approval. | [✅ Validation Report](docs/research-reports/high-commercialization-trials-validation-report.md) |
+| **[Health Emergencies 2026](docs/research-reports/health-emergencies-2026-analysis.md)** | Predictive analysis of emerging pathogen vectors. | N/A |
+| **[NSCLC Drug Repurposing](docs/scenarios/scenario1-walkthrough.md)** | ARID1A synthetic lethality pathways. | [✅ Validation Report](docs/scenarios/scenario1-validation-report.md) |
+
+---
+
 ## References
 
 ### Upstream APIs
@@ -497,7 +517,7 @@ See [docs/test_scenarios.md](docs/test_scenarios.md) for the full list.
 - [FastMCP Documentation](https://gofastmcp.com/)
 
 **Architecture Documentation:**
-- [Architecture v4](architecture/README.md) - Complete architecture analysis with 13,505 lines of code across 56 Python modules
+- [Architecture](architecture/README.md) - Complete architecture analysis with 13,505 lines of code across 56 Python modules
 - [ADR-001 v1.2](docs/adr/accepted/adr-001-v1.2.md) - Binding architecture specification (Fuzzy-to-Fact protocol)
 - [Component Inventory](architecture/docs/01_component_inventory.md) - Detailed component reference
 - [API Reference](architecture/docs/04_api_reference.md) - Usage guide with examples
