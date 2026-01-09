@@ -46,7 +46,7 @@ tests/
 
 Read the following files to understand established patterns:
 - `src/lifesciences_mcp/servers/hgnc.py` - Server pattern
-- `src/lifesciences_mcp/client.py` - Client pattern
+- `src/lifesciences_mcp/clients/hgnc.py` - Client pattern
 - `src/lifesciences_mcp/models/envelopes.py` - Envelope models
 - `tests/integration/test_hgnc_api.py` - Test pattern
 

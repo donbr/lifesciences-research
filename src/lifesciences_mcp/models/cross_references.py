@@ -126,15 +126,6 @@ class CrossReferences(BaseModel):
         description="Protein Data Bank IDs",
     )
 
-    @model_validator(mode="after")
-    def omit_empty_values(self) -> "CrossReferences":
-        """Ensure no empty strings or empty lists are stored (omit instead)."""
-        for field_name in type(self).model_fields:
-            value = getattr(self, field_name)
-            if value == "" or value == []:
-                setattr(self, field_name, None)
-        return self
-
     # Genomic location
     ucsc: str | None = Field(
         default=None,
@@ -146,6 +137,16 @@ class CrossReferences(BaseModel):
         default=None,
         description="Related PubMed IDs (e.g., PMID:123456)",
     )
+
+    @model_validator(mode="after")
+    def omit_empty_values(self) -> "CrossReferences":
+        """Ensure no empty strings or empty lists are stored (omit instead)."""
+        for field_name in type(self).model_fields:
+            value = getattr(self, field_name)
+            if value == "" or value == []:
+                setattr(self, field_name, None)
+        return self
+
 
     def model_dump(self, **kwargs) -> dict:
         """Override to exclude None values (ADR-001: omit keys with no value)."""
