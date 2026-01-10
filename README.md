@@ -202,20 +202,7 @@ uv run pytest tests/ -v
 # Run integration tests only
 uv run pytest -m integration -v
 
-# Test specific server
-uv run pytest tests/integration/test_hgnc_api.py -v -m integration         # 7 tests ✅
-uv run pytest tests/integration/test_uniprot_api.py -v -m integration      # 12 tests ✅
-uv run pytest tests/integration/test_chembl_api.py -v -m integration       # 20 tests ✅
-uv run pytest tests/integration/test_opentargets_api.py -v -m integration  # 9 tests ✅
-uv run pytest tests/integration/test_drugbank_api.py -v -m integration     # 7 tests (⛔ skipped without API key)
-uv run pytest tests/integration/test_string_api.py -v -m integration       # 11 tests ✅
-uv run pytest tests/integration/test_biogrid_api.py -v -m integration      # 11 tests ✅
-uv run pytest tests/integration/test_iuphar_api.py -v -m integration       # 48 tests ✅
-uv run pytest tests/integration/test_pubchem_api.py -v -m integration      # 19 tests ✅
-uv run pytest tests/integration/test_ensembl_api.py -v -m integration      # 24 tests ✅
-uv run pytest tests/integration/test_entrez_api.py -v -m integration       # 20 tests ✅
-uv run pytest tests/integration/test_wikipathways_api.py -v -m integration # 17 tests ✅
-uv run pytest tests/unit/test_clinicaltrials_client.py -v                  # 13 unit tests ✅
+# For per-server test commands, see tests/README.md
 ```
 
 ## Example Usage
@@ -294,7 +281,7 @@ await mcp.call_tool("clinicaltrials_search_trials", {
 
 > **New to this project?** Read [Platform Engineering for AI-Augmented Development](docs/platform-engineering-rationale.md) first to understand our approach to AI-assisted development.
 
-For binding technical specifications, see [ADR-001 v1.2](docs/adr/accepted/adr-001-v1.2.md).
+For binding technical specifications, see [ADR-001 v1.3](docs/adr/accepted/adr-001-v1.3.md).
 
 ### Design Principles
 
@@ -338,22 +325,6 @@ DRUGBANK_API_KEY=your-key-here  # Get from https://go.drugbank.com/
 - **DrugBank**: Requires commercial license. DrugBank server is excluded from the gateway server and requires manual setup.
 - All other 10 servers work without authentication
 
-## Development
-
-```bash
-# Install with dev dependencies
-uv sync --extra dev
-
-# Run tests
-uv run pytest tests/ -v
-
-# Lint and format
-uv run ruff check --fix . && uv run ruff format .
-
-# Type checking
-uv run pyright
-```
-
 ## Developing New Servers (SpecKit v2)
 
 We provide a standardized process for creating new MCP servers that comply with our [Architectural Standards](docs/adr/accepted/adr-001-v1.3.md).
@@ -385,16 +356,7 @@ async def test_get_gene_info(client):
 
 ### Quality Assurance
 
-We maintain a comprehensive list of [Test Scenarios](docs/test_scenarios.md) covering data model validation, error handling, and edge cases.
-
-**Example: Search Candidate Validation**
-| Scenario | Check | Expected Outcome |
-|----------|-------|------------------|
-| **Valid** | `id="HGNC:1100", score=1.0` | Object created |
-| **Invalid Format** | `id="BRCA1"` (missing prefix) | `ValidationError` |
-| **Out of Bounds** | `score=1.5` | `ValidationError` |
-
-See [docs/test_scenarios.md](docs/test_scenarios.md) for the full list.
+See [tests/README.md](tests/README.md) for comprehensive testing documentation including test categories, patterns, and per-server coverage.
 
 ---
 
@@ -436,8 +398,9 @@ We use these tools to perform real-world analysis. All outputs are validated for
 
 ### Related Projects and Showcases
 
-**Showcases:**
-- **NSCLC Drug Repurposing Showcase** (`docs/showcases/nsclc-drug-repurposing/`) - Complete end-to-end workflow demonstrating WikiPathways and ClinicalTrials.gov integration for non-small cell lung cancer research
+**Research Workflows:**
+- **[Competency Questions Catalog](docs/competency-questions-catalog.md)** - 7 research scenarios (synthetic lethality, drug safety, orphan drug discovery) with re-run instructions
+- **[Competency Question Tests](tests/integration/test_competency_questions_mcp.py)** - Integration tests validating multi-server workflows
 
 **Related Projects:**
 - [nsclc-pathways](../nsclc-pathways/) - NSCLC signaling pathway analysis (original inspiration for WikiPathways integration)

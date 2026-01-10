@@ -35,12 +35,13 @@ FastMCP wrappers for essential life sciences APIs, enabling LLM agents to query 
 |----------|---------|
 | `docs/platform-engineering-rationale.md` | **Start here** - WHY we use Platform Engineering for agents |
 | `docs/competency-questions-catalog.md` | Research questions catalog for knowledge graph building |
-| `docs/adr/accepted/adr-001-v1.2.md` | Binding architecture specification |
-| `docs/adr/accepted/adr-002-v1.0.md` | ADR-002: Project Skills (the "Hardware") |
-| `docs/adr/accepted/adr-003-v1.0.md` | ADR-003: SpecKit SDLC (the "Operating System") |
-| `docs/adr/accepted/adr-004-v1.0.md` | ADR-004: FastMCP Lifecycle Management (shutdown hook antipattern) |
-| `docs/adr/accepted/adr-005-v1.0.md` | ADR-005: Git Worktrees for Parallel Development (30-50% speedup) |
-| `docs/speckit-standard-prompt.md` | **Standard prompt template** v1.1.0 for new MCP servers |
+| `docs/adr/accepted/adr-001-v1.3.md` | Binding architecture specification (schemas, protocols, error codes) |
+| `docs/adr/accepted/adr-002-v1.0.md` | Project Skills (the "Hardware") |
+| `docs/adr/accepted/adr-003-v1.0.md` | SpecKit SDLC (the "Operating System") |
+| `docs/adr/accepted/adr-004-v1.0.md` | FastMCP Lifecycle Management (shutdown hook antipattern) |
+| `docs/adr/accepted/adr-005-v1.0.md` | Git Worktrees for Parallel Development |
+| `docs/adr/accepted/adr-006-v1.0.md` | Single Writer Package Architecture |
+| `docs/speckit-standard-prompt.md` | Standard prompt template for new MCP servers |
 
 ## Platform Skills
 
@@ -209,603 +210,51 @@ src/lifesciences_mcp/
     └── gateway.py       # Unified gateway server (mounts all 12 servers for FastMCP Cloud deployment)
 ```
 
-### Implemented Tools
+### Implemented Tools (Summary)
 
-#### HGNC Server (Complete)
+All 12 servers follow the **Fuzzy-to-Fact Protocol**: fuzzy search returns ranked candidates → strict lookup requires resolved CURIE.
 
-| Tool | Type | Description |
-|------|------|-------------|
-| `search_genes` | Fuzzy | Search by name/symbol/synonym, returns ranked SearchCandidates |
-| `get_gene` | Strict | Lookup by HGNC CURIE, returns full Gene with cross_references |
+| Server | Tools | CURIE Format | Tests |
+|--------|-------|--------------|-------|
+| **HGNC** | `search_genes`, `get_gene` | `HGNC:1100` | 7 |
+| **UniProt** | `search_proteins`, `get_protein` | `UniProtKB:P38398` | 12 |
+| **ChEMBL** | `search_compounds`, `get_compound`, `get_compounds_batch` | `CHEMBL:25` | 62 |
+| **Open Targets** | `search_targets`, `get_target`, `get_associations` | `ENSG00000141510` | 9 |
+| **STRING** | `search_proteins`, `get_interactions`, `get_network_image_url` | `STRING:9606.ENSP00000269305` | 11 |
+| **BioGRID** | `search_genes`, `get_interactions` | Gene symbol | 11 |
+| **Ensembl** | `search_genes`, `get_gene`, `get_transcript` | `ENSG*`, `ENST*` | 86 |
+| **Entrez** | `search_genes`, `get_gene`, `get_pubmed_links` | `NCBIGene:7157` | 58 |
+| **PubChem** | `search_compounds`, `get_compound` | `PubChem:CID2244` | 85 |
+| **IUPHAR** | `search_ligands`, `get_ligand`, `search_targets`, `get_target` | `IUPHAR:2713` | 59 |
+| **WikiPathways** | `search_pathways`, `get_pathway`, `get_pathways_for_gene`, `get_pathway_components` | `WP:WP534` | 17 |
+| **ClinicalTrials** | `search_trials`, `get_trial`, `get_trial_locations` | `NCT:00461032` | 13 |
+| **DrugBank** | `search_drugs`, `get_drug` | `DrugBank:DB00945` | 33 (⛔ API key required) |
 
-**Usage:**
+**Run any server:**
 ```bash
-uv run fastmcp run src/lifesciences_mcp/servers/hgnc.py
+uv run fastmcp dev src/lifesciences_mcp/servers/<server>.py
 ```
 
-**Tests:**
-```bash
-uv run pytest tests/integration/test_hgnc_api.py -v -m integration
-# 7/7 tests passing
-```
-
-#### UniProt Server (Complete - All 4 User Stories)
-
-| Tool | Type | Description |
-|------|------|-------------|
-| `search_proteins` | Fuzzy | Search by protein name/gene/organism, returns ranked ProteinSearchCandidates |
-| `get_protein` | Strict | Lookup by UniProt CURIE, returns full Protein with cross_references |
-
-**Usage:**
-```bash
-uv run fastmcp dev src/lifesciences_mcp/servers/uniprot.py
-```
-
-**Tests:**
-```bash
-uv run pytest tests/integration/ -v -m integration
-# 29 integration tests passing (all 4 User Stories complete)
-# US1: Fuzzy search, US2: Strict lookup, US3: Cross-DB integration, US4: Error recovery
-```
-
-**Fuzzy-to-Fact Workflow:**
+**Fuzzy-to-Fact Example:**
 ```python
 # Phase 1: Fuzzy search
-search_result = await client.call_tool("search_proteins", {"query": "BRCA1", "page_size": 10})
-top_candidate = search_result["items"][0]  # {"id": "UniProtKB:P38398", ...}
+result = await client.call_tool("search_genes", {"query": "BRCA1"})
+curie = result["items"][0]["id"]  # "HGNC:1100"
 
 # Phase 2: Strict lookup
-protein = await client.call_tool("get_protein", {"uniprot_id": top_candidate["id"]})
-# Returns complete protein with cross_references (HGNC, Ensembl, RefSeq, PDB, OMIM, etc.)
+gene = await client.call_tool("get_gene", {"hgnc_id": curie})
+# Returns Gene with cross_references to UniProt, Ensembl, RefSeq, etc.
 ```
 
-#### ChEMBL Server (Complete - All 4 User Stories)
+For detailed server documentation (API details, rate limits, workflows), see the server source files in `src/lifesciences_mcp/servers/`.
 
-| Tool | Type | Description |
-|------|------|-------------|
-| `search_compounds` | Fuzzy | Search by compound name/synonym/identifier, returns ranked CompoundSearchCandidates |
-| `get_compound` | Strict | Lookup by ChEMBL CURIE, returns full Compound with cross_references |
-| `get_compounds_batch` | Batch | Batch lookup to prevent thread pool exhaustion (uses SDK filter) |
+**Note:** DrugBank requires commercial API key (`DRUGBANK_API_KEY`). Implementation complete, integration tests skipped without key.
 
-**Usage:**
-```bash
-uv run fastmcp dev src/lifesciences_mcp/servers/chembl.py
-```
+**Note:** ClinicalTrials.gov integration tests blocked by Cloudflare. See Manual Testing section above for curl-based verification.
 
-**Tests:**
-```bash
-uv run pytest tests/integration/test_chembl_api.py -v -m integration
-uv run pytest tests/unit/test_chembl_models.py tests/unit/test_chembl_client.py -v
-# 50+ tests covering all 4 User Stories
-```
+**Note:** BioGRID requires free API key (`BIOGRID_API_KEY`) from https://webservice.thebiogrid.org/
 
-**Fuzzy-to-Fact Workflow:**
-```python
-# Phase 1: Fuzzy search
-search_result = await client.call_tool("search_compounds", {"query": "aspirin", "page_size": 10})
-top_candidate = search_result["items"][0]  # {"id": "CHEMBL:25", ...}
-
-# Phase 2: Strict lookup
-compound = await client.call_tool("get_compound", {"chembl_id": top_candidate["id"]})
-# Returns complete compound with cross_references (UniProt, PDB, PubChem, DrugBank, etc.)
-
-# Batch operations (prevents thread pool exhaustion)
-compounds = await client.call_tool("get_compounds_batch", {
-    "chembl_ids": ["CHEMBL:25", "CHEMBL:941", "CHEMBL:1201583"],
-    "slim": True  # default: minimal fields for token efficiency
-})
-```
-
-**Note:** ChEMBL uses synchronous SDK (`chembl_webresource_client`). SDK calls are wrapped with `run_in_executor` per ADR-001 §2 exception. Batch operations use `molecule.filter()` for efficient single API calls.
-
-#### Open Targets Server (Complete - PR #11 merged)
-
-| Tool | Type | Description |
-|------|------|-------------|
-| `search_targets` | Fuzzy | Search by gene symbol/name, returns ranked TargetSearchCandidates |
-| `get_target` | Strict | Lookup by Ensembl ID, returns full Target with cross_references |
-| `get_associations` | Strict | Get target-disease associations with evidence scores |
-
-**Usage:**
-```bash
-uv run fastmcp dev src/lifesciences_mcp/servers/opentargets.py
-```
-
-**Tests:**
-```bash
-uv run pytest tests/integration/test_opentargets_api.py -v -m integration
-# 9 integration tests passing
-```
-
-#### DrugBank Server (⛔ BLOCKED - PR #12 open)
-
-| Tool | Type | Description |
-|------|------|-------------|
-| `search_drugs` | Fuzzy | Search by name/brand/indication, returns ranked DrugSearchCandidates |
-| `get_drug` | Strict | Lookup by DrugBank CURIE, returns full Drug with cross_references |
-
-**⚠️ API Access Required:**
-DrugBank requires a commercial API key. The implementation is code-complete with 33 unit tests passing, but integration tests are skipped without `DRUGBANK_API_KEY`.
-
-| Endpoint | Status | Notes |
-|----------|--------|-------|
-| `go.drugbank.com` (public) | ❌ Blocked | Cloudflare challenge |
-| `api.drugbank.com` (commercial) | ❌ 401 | API key required |
-
-**To enable DrugBank:**
-```bash
-# Obtain API key from https://go.drugbank.com or sales@drugbank.com
-export DRUGBANK_API_KEY="your-key-here"
-
-# Run tests
-uv run pytest tests/integration/test_drugbank_api.py -v -m integration
-```
-
-**Tests (without API key):**
-```bash
-# Unit tests always run (mocked)
-uv run pytest tests/unit/test_drugbank_client.py tests/unit/test_drugbank_models.py -v
-# 33 unit tests passing
-
-# Integration tests skip automatically without DRUGBANK_API_KEY
-uv run pytest tests/integration/test_drugbank_api.py -v
-# 7 skipped
-```
-
-#### Ensembl Server (✅ Complete - Tier 4)
-
-| Tool | Type | Description |
-|------|------|-------------|
-| `search_genes` | Fuzzy | Search by gene symbol/name/description, returns ranked GeneSearchCandidates |
-| `get_gene` | Strict | Lookup by Ensembl Gene ID (ENSG*), returns full EnsemblGene with cross_references |
-| `get_transcript` | Strict | Lookup by Ensembl Transcript ID (ENST*), returns EnsemblTranscript with parent gene |
-
-**Usage:**
-```bash
-uv run fastmcp dev src/lifesciences_mcp/servers/ensembl.py
-```
-
-**Tests:**
-```bash
-uv run pytest tests/integration/test_ensembl_api.py -v -m integration
-uv run pytest tests/unit/test_ensembl_models.py tests/unit/test_ensembl_client.py -v
-# 86 tests (62 unit + 24 integration)
-```
-
-**API Details:**
-- **Base URL**: `https://rest.ensembl.org`
-- **Protocol**: REST (JSON output)
-- **Auth**: None required
-- **Rate Limit**: 15 req/s
-
-**Fuzzy-to-Fact Workflow:**
-```python
-# Phase 1: Fuzzy search
-search_result = await client.call_tool("search_genes", {"query": "BRCA1", "species": "human"})
-top_candidate = search_result["items"][0]  # {"id": "ENSG00000012048", "symbol": "BRCA1", ...}
-
-# Phase 2: Strict lookup
-gene = await client.call_tool("get_gene", {"ensembl_id": top_candidate["id"]})
-# Returns EnsemblGene with cross_references (HGNC, UniProt, Entrez, RefSeq, PDB, OMIM, etc.)
-
-# Phase 3: Get transcript details
-transcript = await client.call_tool("get_transcript", {"transcript_id": gene["transcripts"][0]})
-# Returns EnsemblTranscript with parent_gene, is_canonical flag
-```
-
-**Species Aliases:**
-The server accepts common species aliases that are normalized to Ensembl format:
-| Alias | Ensembl Format |
-|-------|----------------|
-| `human` | `homo_sapiens` |
-| `mouse` | `mus_musculus` |
-| `rat` | `rattus_norvegicus` |
-| `zebrafish` | `danio_rerio` |
-| `fly`, `drosophila` | `drosophila_melanogaster` |
-| `worm`, `c.elegans` | `caenorhabditis_elegans` |
-| `yeast` | `saccharomyces_cerevisiae` |
-
-#### STRING Server (✅ Complete - Tier 1)
-
-| Tool | Type | Description |
-|------|------|-------------|
-| `search_proteins` | Fuzzy | Search by gene symbol/protein name, returns ranked InteractionSearchCandidates |
-| `get_interactions` | Strict | Lookup by STRING CURIE, returns InteractionNetwork with evidence scores |
-| `get_network_image_url` | Utility | Generate network visualization URL |
-
-**Usage:**
-```bash
-uv run fastmcp dev src/lifesciences_mcp/servers/string.py
-```
-
-**API Details:**
-- **Base URL**: `https://string-db.org/api`
-- **Protocol**: REST (JSON output)
-- **Auth**: None required
-- **Rate Limit**: 1 req/sec
-
-**Evidence Channels:**
-STRING provides 7 evidence types per interaction:
-| Channel | Description |
-|---------|-------------|
-| `nscore` | Neighborhood (gene proximity) |
-| `fscore` | Gene fusion events |
-| `pscore` | Phyletic profiles (co-occurrence) |
-| `ascore` | Co-expression (mRNA correlation) |
-| `escore` | Experimental (physical binding) |
-| `dscore` | Database (curated knowledge) |
-| `tscore` | Textmining (literature mentions) |
-
-**Fuzzy-to-Fact Workflow:**
-```python
-# Phase 1: Fuzzy search
-search_result = await client.call_tool("search_proteins", {"query": "TP53", "species": 9606})
-top_candidate = search_result["items"][0]  # {"id": "STRING:9606.ENSP00000269305", ...}
-
-# Phase 2: Strict lookup
-network = await client.call_tool("get_interactions", {
-    "string_id": top_candidate["id"],
-    "required_score": 700,  # High confidence
-    "limit": 10
-})
-# Returns InteractionNetwork with MDM2, ATM, BRCA1 interactions
-```
-
-#### BioGRID Server (✅ Complete - Tier 1)
-
-| Tool | Type | Description |
-|------|------|-------------|
-| `search_genes` | Fuzzy | Validate gene symbol for BioGRID queries (Phase 1), returns normalized gene symbol |
-| `get_interactions` | Strict | Get genetic/protein interactions for validated gene symbol (Phase 2) with experimental evidence |
-
-**Usage:**
-```bash
-uv run fastmcp dev src/lifesciences_mcp/servers/biogrid.py
-```
-
-**API Details:**
-- **Base URL**: `https://webservice.thebiogrid.org`
-- **Protocol**: REST (JSON output)
-- **Auth**: Required (BIOGRID_API_KEY)
-- **Rate Limit**: 2 req/sec
-
-**Tests:**
-```bash
-uv run pytest tests/integration/test_biogrid_api.py -v -m integration
-# 11 integration tests passing (all 4 User Stories)
-```
-
-**Key Features:**
-- **Experimental evidence types**: Affinity Capture, Two-hybrid, Co-immunoprecipitation, etc.
-- **Physical vs genetic interactions**: experimental_system_type field distinguishes interaction types
-- **Throughput metadata**: High/low throughput annotations for reliability assessment
-- **Entrez cross-references**: Automatic gene ID mapping for database integration
-
-**Fuzzy-to-Fact Workflow:**
-```python
-# Phase 1: Validate gene symbol
-search_result = await client.call_tool("search_genes", {"query": "TP53"})
-validated_symbol = search_result["items"][0]["gene_symbol"]  # "TP53"
-
-# Phase 2: Get interactions
-interactions = await client.call_tool("get_interactions", {
-    "gene_symbol": validated_symbol,
-    "max_results": 100
-})
-# Returns InteractionResult with:
-# - interactions: list of GeneticInteraction objects
-# - physical_count: number of physical interactions
-# - genetic_count: number of genetic interactions
-# - cross_references: {"entrez": "7157"}
-```
-
-**Get API key (free):** https://webservice.thebiogrid.org/
-
-#### Entrez Server (✅ Complete - Tier 4)
-
-| Tool | Type | Description |
-|------|------|-------------|
-| `search_genes` | Fuzzy | Search by name/symbol/synonym, returns ranked GeneSearchCandidates with NCBIGene CURIEs |
-| `get_gene` | Strict | Lookup by NCBIGene CURIE, returns full EntrezGene with cross_references |
-| `get_pubmed_links` | Strict | Get PubMed IDs associated with a gene for literature discovery |
-
-**Usage:**
-```bash
-uv run fastmcp dev src/lifesciences_mcp/servers/entrez.py
-```
-
-**API Details:**
-- **Base URL**: `https://eutils.ncbi.nlm.nih.gov/entrez/eutils`
-- **Protocol**: REST (JSON for esearch/esummary, XML for efetch)
-- **Auth**: Optional NCBI_API_KEY for higher rate limits
-- **Rate Limit**: 3 req/s (no key) or 10 req/s (with NCBI_API_KEY)
-
-**Tests:**
-```bash
-uv run pytest tests/integration/test_entrez_api.py -v -m integration
-# 20 integration tests passing (all 4 User Stories)
-# 38 unit tests passing (models + client)
-# Performance: 95th percentile = 1.029s < 2.0s (SC-001)
-```
-
-**Key Features:**
-- **Two-step API pattern**: esearch (returns IDs) → efetch/esummary (returns data)
-- **XML parsing**: Uses defusedxml for security (prevents XXE attacks)
-- **Adaptive rate limiting**: Automatically adjusts based on NCBI_API_KEY presence
-- **Cross-reference extraction**: Maps Entrezgene_xref XML to 22-key Agentic Biolink schema
-
-**Fuzzy-to-Fact Workflow:**
-```python
-# Phase 1: Fuzzy search
-search_result = await client.call_tool("search_genes", {"query": "BRCA1", "organism": "human"})
-top_candidate = search_result["items"][0]  # {"id": "NCBIGene:672", ...}
-
-# Phase 2: Strict lookup
-gene = await client.call_tool("get_gene", {"entrez_id": top_candidate["id"]})
-# Returns EntrezGene with cross_references (HGNC, Ensembl, UniProt, RefSeq, etc.)
-
-# Phase 3: Literature discovery
-pubmed_ids = await client.call_tool("get_pubmed_links", {"entrez_id": top_candidate["id"], "limit": 10})
-# Returns list of PubMed IDs for evidence gathering
-```
-
-**CURIE Format:**
-- Pattern: `NCBIGene:\d+`
-- Examples: `NCBIGene:7157` (TP53), `NCBIGene:672` (BRCA1)
-- Validation: `^NCBIGene:\d+$`
-
-**To obtain API key (free):** https://www.ncbi.nlm.nih.gov/account/settings/
-
-#### PubChem Server (✅ Complete - Tier 2)
-
-| Tool | Type | Description |
-|------|------|-------------|
-| `search_compounds` | Fuzzy | Search by compound name/synonym/identifier, returns ranked CompoundSearchCandidates |
-| `get_compound` | Strict | Lookup by PubChem CURIE, returns full Compound with SMILES, InChI, and cross_references |
-
-**Usage:**
-```bash
-uv run fastmcp dev src/lifesciences_mcp/servers/pubchem.py
-```
-
-**API Details:**
-- **Base URL**: `https://pubchem.ncbi.nlm.nih.gov/rest/pug`
-- **Protocol**: REST (JSON output)
-- **Auth**: None required
-- **Rate Limit**: 5 req/s or 400 req/min
-
-**Tests:**
-```bash
-uv run pytest tests/integration/test_pubchem_api.py -v -m integration
-uv run pytest tests/unit/test_pubchem_models.py tests/unit/test_pubchem_client.py -v
-# 100 tests (81 unit + 19 integration)
-```
-
-**Key Features:**
-- **Chemical identifiers**: SMILES, InChI, InChIKey for computational chemistry
-- **Cross-references**: ChEMBL, DrugBank, KEGG for drug discovery workflows
-- **Slim mode**: Token-efficient responses for batch operations
-- **CURIE validation**: `^PubChem:CID\d+$` pattern enforcement
-
-**Fuzzy-to-Fact Workflow:**
-```python
-# Phase 1: Fuzzy search
-search_result = await client.call_tool("search_compounds", {"query": "aspirin", "page_size": 10})
-top_candidate = search_result["items"][0]  # {"id": "PubChem:CID2244", ...}
-
-# Phase 2: Strict lookup
-compound = await client.call_tool("get_compound", {"pubchem_id": top_candidate["id"]})
-# Returns Compound with:
-# - molecular_formula: "C9H8O4"
-# - smiles: "CC(=O)OC1=CC=CC=C1C(=O)O"
-# - inchi: "InChI=1S/C9H8O4/c1-6(10)13-8-5-3-2-4-7(8)9(11)12/h2-5H,1H3,(H,11,12)"
-# - cross_references: {"chembl": ["CHEMBL:25"], "drugbank": ["DB00945"], ...}
-```
-
-**CURIE Format:**
-- Pattern: `PubChem:CID\d+`
-- Examples: `PubChem:CID2244` (aspirin), `PubChem:CID2519` (caffeine)
-- Validation: `^PubChem:CID\d+$`
-
-#### IUPHAR/GtoPdb Server (✅ Complete - Tier 2)
-
-| Tool | Type | Description |
-|------|------|-------------|
-| `search_ligands` | Fuzzy | Search pharmacological ligands (drugs, chemicals, peptides) by name, returns ranked LigandSearchCandidates |
-| `get_ligand` | Strict | Lookup by IUPHAR CURIE, returns full Ligand with approval status and cross_references |
-| `search_targets` | Fuzzy | Search pharmacological targets (receptors, enzymes, ion channels) by name, returns ranked TargetSearchCandidates |
-| `get_target` | Strict | Lookup by IUPHAR CURIE, returns full Target with gene symbols and cross_references |
-
-**Usage:**
-```bash
-uv run fastmcp dev src/lifesciences_mcp/servers/iuphar.py
-```
-
-**API Details:**
-- **Base URL**: `https://www.guidetopharmacology.org/services`
-- **Protocol**: REST (JSON output)
-- **Auth**: None required
-- **Rate Limit**: Not specified
-
-**Tests:**
-```bash
-uv run pytest tests/integration/test_iuphar_api.py -v -m integration
-# 59 tests (48 integration + 11 unit, all 5 User Stories)
-```
-
-**Key Features:**
-- **Approved drugs**: Filter by FDA/EMA approval status, WHO Essential Medicines List
-- **Target classification**: GPCR, Enzyme, Ion channel, Nuclear receptor families
-- **Cross-references**: ChEMBL, DrugBank, PubChem for ligands; UniProt, Ensembl, HGNC for targets
-- **Shared ID space**: Ligands and targets share numeric IDs (use search tools to disambiguate)
-
-**Fuzzy-to-Fact Workflow (Ligands):**
-```python
-# Phase 1: Fuzzy search for drug
-search_result = await client.call_tool("search_ligands", {"query": "ibuprofen", "approved_only": True})
-top_candidate = search_result["items"][0]  # {"id": "IUPHAR:2713", "approved": True, ...}
-
-# Phase 2: Strict lookup
-ligand = await client.call_tool("get_ligand", {"iuphar_id": top_candidate["id"]})
-# Returns Ligand with:
-# - approved: True
-# - approval_source: "FDA (1974)"
-# - who_essential: True
-# - synonyms: ["Advil", "Motrin", "Nurofen"]
-# - cross_references: {"chembl": "521", "drugbank": "DB01050", "pubchem_compound": "3672"}
-```
-
-**Fuzzy-to-Fact Workflow (Targets):**
-```python
-# Phase 1: Fuzzy search for receptor
-search_result = await client.call_tool("search_targets", {"query": "dopamine", "type_filter": "GPCR"})
-top_candidate = search_result["items"][0]  # {"id": "IUPHAR:215", "name": "D2 receptor", ...}
-
-# Phase 2: Strict lookup
-target = await client.call_tool("get_target", {"iuphar_id": top_candidate["id"]})
-# Returns Target with:
-# - gene_symbol: "DRD2"
-# - species: "Homo sapiens"
-# - target_family: "GPCR"
-# - cross_references: {"uniprot": ["P14416"], "ensembl_gene": "ENSG00000149295", "hgnc": "HGNC:3023"}
-```
-
-**CURIE Format:**
-- Pattern: `IUPHAR:\d+`
-- Examples: `IUPHAR:2713` (ibuprofen ligand), `IUPHAR:215` (D2 receptor target)
-- Validation: `^IUPHAR:\d+$`
-
-#### WikiPathways Server (✅ Complete - Tier 3)
-
-| Tool | Type | Description |
-|------|------|-------------|
-| `search_pathways` | Fuzzy | Search pathways by name/description/gene, returns ranked PathwaySearchCandidates |
-| `get_pathway` | Strict | Lookup by WikiPathways CURIE, returns full Pathway with metadata and revision info |
-| `get_pathways_for_gene` | Reverse | Find all pathways containing a specific gene (reverse lookup) |
-| `get_pathway_components` | Strict | Extract biological entities (genes, proteins, metabolites, interactions) from pathway |
-
-**Usage:**
-```bash
-uv run fastmcp dev src/lifesciences_mcp/servers/wikipathways.py
-```
-
-**API Details:**
-- **Base URL**: `https://webservice.wikipathways.org`
-- **Protocol**: REST (JSON output)
-- **Auth**: None required
-- **Rate Limit**: Not specified
-
-**Key Features:**
-- **Reverse lookup**: Find pathways by gene symbol (e.g., all pathways containing BRCA1)
-- **Component extraction**: Get genes, proteins, metabolites, and interactions from pathway diagrams
-- **Species filtering**: Supports Homo sapiens, Mus musculus, and 20+ other organisms
-- **Revision metadata**: Track pathway updates with revision number and last_edited timestamps
-
-**Fuzzy-to-Fact Workflow:**
-```python
-# Phase 1: Fuzzy search
-search_result = await client.call_tool("search_pathways", {"query": "glycolysis", "organism": "Homo sapiens"})
-top_candidate = search_result["items"][0]  # {"id": "WP:WP534", "name": "Glycolysis and Gluconeogenesis", ...}
-
-# Phase 2: Strict lookup
-pathway = await client.call_tool("get_pathway", {"pathway_id": top_candidate["id"]})
-# Returns Pathway with:
-# - name: "Glycolysis and Gluconeogenesis"
-# - organism: "Homo sapiens"
-# - description: "...metabolic pathway description..."
-# - component_counts: {"genes": 25, "proteins": 30, "metabolites": 15, "interactions": 40}
-
-# Phase 3: Extract components
-components = await client.call_tool("get_pathway_components", {"pathway_id": top_candidate["id"]})
-# Returns PathwayComponents with:
-# - genes: [{"id": "HGNC:6535", "label": "HK1"}, ...]
-# - proteins: [{"id": "UniProtKB:P19367", "label": "Hexokinase-1"}, ...]
-# - metabolites: [{"id": "CHEBI:17234", "label": "Glucose"}, ...]
-# - interactions: [{"source": "HK1", "target": "Glucose", "type": "catalysis"}, ...]
-```
-
-**Reverse Lookup Workflow:**
-```python
-# Find all pathways containing BRCA1
-pathways = await client.call_tool("get_pathways_for_gene", {"gene_id": "BRCA1", "organism": "Homo sapiens"})
-# Returns PaginationEnvelope with pathways:
-# [{"id": "WP:WP4868", "name": "DNA Damage Response", ...}, ...]
-```
-
-**CURIE Format:**
-- Pattern: `WP:WP\d+`
-- Examples: `WP:WP534` (Glycolysis), `WP:WP4868` (DNA Damage Response)
-- Validation: `^WP:WP\d+$`
-
-#### ClinicalTrials.gov Server (✅ Complete - Tier 3)
-
-| Tool | Type | Description |
-|------|------|-------------|
-| `search_trials` | Fuzzy | Search clinical trials by condition/intervention/location, returns ranked TrialSearchCandidates |
-| `get_trial` | Strict | Lookup by NCT CURIE, returns full Trial with protocol, eligibility, and outcomes |
-| `get_trial_locations` | Strict | Get facility locations and contact information for a trial |
-
-**Usage:**
-```bash
-uv run fastmcp dev src/lifesciences_mcp/servers/clinicaltrials.py
-```
-
-**API Details:**
-- **Base URL**: `https://clinicaltrials.gov/api/v2`
-- **Protocol**: REST (JSON output)
-- **Auth**: None required
-- **Rate Limit**: Not specified
-- **⚠️ Cloudflare Blocking**: Python httpx clients blocked (403 Forbidden), use curl for manual testing
-
-**Tests:**
-```bash
-# Unit tests (parameter validation)
-uv run pytest tests/unit/test_clinicaltrials_client.py -v
-# 13 unit tests passing
-
-# Manual testing with curl (integration tests blocked by Cloudflare)
-curl -s "https://clinicaltrials.gov/api/v2/studies?query.term=cancer&pageSize=1&format=json" | jq
-```
-
-**Key Features:**
-- **Multi-filter search**: Condition, intervention, phase, status, location filters
-- **Recruitment status**: RECRUITING, COMPLETED, NOT_YET_RECRUITING, etc.
-- **Trial phases**: PHASE1, PHASE2, PHASE3, PHASE4, EARLY_PHASE1, NA
-- **Geographic search**: Filter by city, state, or country
-- **Facility details**: Contact names, phone numbers, emails for trial sites
-
-**Fuzzy-to-Fact Workflow:**
-```python
-# Phase 1: Fuzzy search
-search_result = await client.call_tool("search_trials", {
-    "query": "breast cancer",
-    "phase": "PHASE3",
-    "status": "RECRUITING",
-    "location": "Boston"
-})
-top_candidate = search_result["items"][0]  # {"id": "NCT:00461032", "title": "...", ...}
-
-# Phase 2: Strict lookup
-trial = await client.call_tool("get_trial", {"nct_id": top_candidate["id"]})
-# Returns Trial with:
-# - protocol: {study_type, allocation, intervention_model, masking, primary_purpose}
-# - eligibility: {criteria_text, age_range, sex, healthy_volunteers}
-# - outcomes: {primary: [...], secondary: [...]}
-# - sponsors: {lead_sponsor, collaborators}
-
-# Phase 3: Get trial locations
-locations = await client.call_tool("get_trial_locations", {"nct_id": top_candidate["id"]})
-# Returns list of TrialLocation objects:
-# [{"facility_name": "Dana-Farber Cancer Institute", "city": "Boston", "recruitment_status": "RECRUITING", ...}]
-```
-
-**CURIE Format:**
-- Pattern: `NCT:\d{8}`
-- Examples: `NCT:00461032`, `NCT:04123456`
-- Validation: `^NCT:\d{8}$`
-
-**Cloudflare Blocking Workaround:**
-See "Manual Testing" section at top of CLAUDE.md for curl-based verification commands.
+**Note:** NCBI/Entrez optionally uses `NCBI_API_KEY` for higher rate limits (3→10 req/s). Free at https://www.ncbi.nlm.nih.gov/account/settings/
 
 ### Core Patterns
 
@@ -825,34 +274,12 @@ See "Manual Testing" section at top of CLAUDE.md for curl-based verification com
 
 ### Normative Schemas
 
-**Pagination Envelope** (all list tools must use):
-```json
-{
-  "items": [...],
-  "pagination": {"cursor": "string|null", "total_count": "int|null", "page_size": 50}
-}
-```
-
-**Error Envelope** (all errors must use):
-```json
-{
-  "success": false,
-  "error": {"code": "UNRESOLVED_ENTITY", "message": "...", "recovery_hint": "...", "invalid_input": "..."}
-}
-```
-
-**Error Codes:** `UNRESOLVED_ENTITY`, `ENTITY_NOT_FOUND`, `AMBIGUOUS_QUERY`, `RATE_LIMITED`, `UPSTREAM_ERROR`, `INVALID_CROSS_REFERENCE`
-
-### Cross-Reference Keys (22 total)
-```
-Core:        hgnc, ensembl_gene, ensembl_transcript, uniprot, entrez, refseq
-Drugs:       chembl, drugbank
-Interactions: string, biogrid, stitch, iuphar
-Pathways:    kegg, kegg_pathway, omim, orphanet, mondo, efo
-Structural:  pdb, pubchem_compound, pubchem_substance
-```
-
-**Null Handling:** Omit keys entirely if no cross-reference exists (never use `null` or empty string).
+See [ADR-001 v1.3](docs/adr/accepted/adr-001-v1.3.md) for complete specifications:
+- **§8 Pagination Envelope** - All list tools must use
+- **§8 Error Envelope** - All errors must use with recovery hints
+- **§9 Error Code Registry** - 6 standard error codes
+- **§5 Cross-Reference Keys** - 22-key Agentic Biolink schema
+- **§4 Null Handling** - Omit keys entirely (never use `null` or empty string)
 
 ## Environment Variables
 
@@ -878,11 +305,6 @@ git switch -c implement/<id>-<description>
 # e.g., git switch -c implement/001-hgnc-mcp-server
 ```
 
-## Linear Project
-
-- Project: Life Sciences MCP Server
-- Key Issues: AGE-65 (Discovery), AGE-66 (ADR v1.1), AGE-67 (Amendment)
-
 ## Active Technologies
 
 **Core Stack:**
@@ -900,76 +322,3 @@ git switch -c implement/<id>-<description>
 - Fuzzy-to-Fact protocol (fuzzy search → CURIE resolution → strict lookup)
 - Agentic Biolink schema (flattened JSON with cross_references)
 - Token budgeting (`slim=True` parameter for batch operations)
-
-## Recent Changes
-
-### 008-ensembl-mcp-server: Ensembl Complete - All 4 User Stories (2026-01-02)
-- **User Story 1 (Fuzzy Gene Search)** - Complete
-  - `search_genes`: Fuzzy search with species aliases, cursor pagination, relevance ranking
-  - Species alias mapping (human->homo_sapiens, mouse->mus_musculus, etc.)
-  - CURIE validation: `^ENSG\d{11}$` for gene IDs
-  - Rate limiting: 15 req/s with exponential backoff
-- **User Story 2 (Strict Gene Lookup)** - Complete
-  - `get_gene`: Strict ENSG ID lookup with complete gene records
-  - Cross-reference mapping to 12 Ensembl-relevant databases (HGNC, UniProt, Entrez, RefSeq, PDB, OMIM, KEGG, ChEMBL, etc.)
-  - Transcript ID list included in gene response
-  - Error handling: UNRESOLVED_ENTITY, ENTITY_NOT_FOUND, UPSTREAM_ERROR with recovery hints
-- **User Story 3 (Transcript Lookup)** - Complete
-  - `get_transcript`: Strict ENST ID lookup with parent gene reference
-  - Canonical transcript flag (`is_canonical`)
-  - Cross-references to UniProt, RefSeq, CCDS
-- **User Story 4 (Error Recovery)** - Complete
-  - Actionable recovery hints for all error codes
-  - Gene ID vs Transcript ID confusion detection with helpful hints
-  - Complete error→hint→recovery→success cycle validation
-- **Phase 7 Polish** - Complete
-  - **86 tests passing** (62 unit + 24 integration)
-  - **70/72 tasks complete (97%)**, 2 optional (performance test, CLAUDE.md update)
-  - Module-level docstrings on all modules
-  - Lint/type checks pass (ruff, pyright)
-
-### 002-uniprot-mcp-server: UniProt Complete - All 4 User Stories (2025-12-22)
-- **User Story 1 (Fuzzy Protein Search)** - Complete
-  - `search_proteins`: Fuzzy search with cursor pagination, query validation, relevance ranking
-  - Comprehensive research phase (R1-R7) documented in `specs/002-uniprot-mcp-server/research.md`
-  - CURIE validation: `^UniProtKB:[A-Z][A-Z0-9]{5,9}$`
-  - Rate limiting: 10 req/s with exponential backoff + thundering herd prevention
-  - All HGNC code review lessons "shifted left" into functional requirements
-- **User Story 2 (Strict Protein Lookup)** - Complete
-  - `get_protein`: Strict CURIE lookup with complete protein records
-  - Cross-reference mapping to 22-key Agentic Biolink schema (HGNC, Ensembl, RefSeq, PDB, KEGG, OMIM, etc.)
-  - Error handling: UNRESOLVED_ENTITY, ENTITY_NOT_FOUND, UPSTREAM_ERROR with recovery hints
-  - Slim mode implementation (~20 vs ~115-300 tokens)
-  - End-to-end Fuzzy-to-Fact workflow validated
-- **User Story 3 (Cross-Database Integration)** - Complete
-  - 3 integration tests validating cross-reference extraction and mapping
-  - HGNC mapping verification, omit-if-null pattern compliance (Constitution Principle III)
-  - Cross-references to 22 biological databases (HGNC, Ensembl, RefSeq, PDB, KEGG, OMIM, etc.)
-- **User Story 4 (Error Recovery)** - Complete
-  - 11 error recovery tests (7 unit + 4 integration)
-  - Actionable recovery hints for all error codes (AMBIGUOUS_QUERY, UNRESOLVED_ENTITY, ENTITY_NOT_FOUND, RATE_LIMITED, UPSTREAM_ERROR)
-  - Complete error→hint→recovery→success cycle validation
-  - New files: `test_error_envelopes.py`, `test_error_recovery.py`
-- **Phase 7 Polish** - Complete
-  - Performance tests validating SC-001 (<2s for 95% of queries)
-  - Comprehensive quickstart guide with 4 workflows and error recovery examples
-  - **50/50 tests passing** (29 integration + 21 unit)
-  - **74/76 tasks complete (97%)**, 2 skipped per ADR-004
-- **ADR-004: FastMCP Lifecycle Management** - Created
-  - Documents shutdown hook antipattern (`@mcp.on_event` not supported in FastMCP)
-  - Establishes module-level singleton pattern as normative
-  - References MCP Protocol and FastMCP documentation
-  - Resolves lifecycle management gap in ADR-002
-
-### 001-hgnc-mcp-server: HGNC Complete (2025-12-21)
-- Implemented HGNC MCP Server with Fuzzy-to-Fact protocol
-  - `search_genes`: Fuzzy search returning ranked SearchCandidate results
-  - `get_gene`: Strict lookup by HGNC CURIE returning full Gene with cross_references
-  - Canonical envelopes: PaginationEnvelope, ErrorEnvelope (ADR-001 §8)
-  - Rate limiting: 10 req/s with exponential backoff
-  - 24 passing tests (14 unit, 10 integration)
-  - Code review fixes applied: race conditions, resource cleanup, exponential backoff
-
-### Platform Engineering
-- Created `/scaffold-fastmcp` skill for Constitution Principle VI compliance
-- Created standard prompt template (`docs/speckit-standard-prompt.md`) to prevent specification drift
