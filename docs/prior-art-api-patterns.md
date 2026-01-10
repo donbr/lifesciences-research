@@ -284,9 +284,77 @@ cross_references: {
 
 **Impact:** Agents can choose the right tool for the job: MCP for verified entities, curl for bulk edges, Graphiti for research documentation.
 
+### 7.6 Competency Questions as Validation Framework
+
+**Prior Art:** The [BTE-RAG paper (2025)](https://www.biorxiv.org/content/10.1101/2025.08.01.668022v1.full) created benchmark datasets from DrugMechDB to evaluate LLM performance:
+
+| Benchmark Type | Questions | Example Pattern |
+|----------------|-----------|-----------------|
+| Gene-centric mechanisms | 798 | "What is the mechanism by which [drug] affects [gene]?" |
+| Metabolite effects | 201 | "How does [compound] influence [metabolic process]?" |
+| Drug-biological process | 842 | "What biological process does [drug] modulate?" |
+
+The [Knowledge Graph-Based Thought framework (2025)](https://academic.oup.com/gigascience/article/doi/10.1093/gigascience/giae082/7943459) uses KGs to validate LLM responses for drug-cancer associations.
+
+The [Hybrid LLM-KG Framework (2025)](https://jastt.org/index.php/jasttpath/article/view/404) operates on 65,000+ entities and 3M relationships, translating natural language to Cypher queries.
+
+**Our Innovation:** The `competency-questions-catalog.md` defines scenario-based research questions that drive graph construction:
+
+| Scenario | Question Type | Validation Target |
+|----------|---------------|-------------------|
+| Synthetic Lethality | "How can we identify therapeutic strategies for ARID1A-deficient cancer?" | Gene→Gene (SL pairs) → Drug |
+| Drug Safety Profiling | "What are off-target risks of Dasatinib?" | Drug → Off-targets → Safety genes |
+| Orphan Drug Discovery | "What novel targets exist for Huntington's Disease?" | Disease → Gap analysis → Novel targets |
+| Pathway Validation | "How do we validate the p53-MDM2-Nutlin axis?" | Gene → Gene → Drug (mechanism) |
+
+**Alignment with Industry:**
+
+| BTE-RAG Benchmark | Our Competency Question |
+|-------------------|-------------------------|
+| Gene-centric mechanisms | Scenario 1 (ARID1A → EZH2), Scenario 4 (TP53 → MDM2) |
+| Drug-biological process | Scenario 2 (Dasatinib → DDR2 cardiotoxicity) |
+| Metabolite effects | Scenario 3 (HTT → GLUT3 metabolism) |
+
+**Impact:** Competency questions serve dual purposes:
+1. **Scope Definition** - Define what the knowledge graph should answer
+2. **Validation Framework** - Benchmark queries to verify graph completeness
+
+See: `docs/competency-questions-catalog.md`
+
 ---
 
-## 8. Research Directions Informed by Prior Art
+## 8. Why This Matters: Evidence for Structured API Access
+
+### Quantitative Evidence
+
+The 2025 research provides strong quantitative evidence that structured API access outperforms unstructured text retrieval:
+
+| Study | Baseline | With Structured APIs | Improvement |
+|-------|----------|---------------------|-------------|
+| BTE-RAG (GPT-4o mini) | 51% | 75.8% | **+24.8 pp** |
+| BTE-RAG (GPT-4o) | 69.8% | 78.6% | **+8.8 pp** |
+| RAG Systematic Review | 1.0x | 1.35x | **35% odds ratio** |
+
+This validates the core architectural principle: **canonical CURIEs, typed entities, and evidence scores aren't just convenient—they're what benchmarks prove works.**
+
+### The Value of Prior Art Documentation
+
+This document serves multiple purposes:
+
+1. **For Researchers:** Understand established patterns before claiming novelty
+2. **For Collaborators:** See how this project aligns with (and extends) industry standards
+3. **For the Community:** Educational resource documenting which patterns have consensus
+
+**Pattern of acknowledgment:**
+- First: Document prior art and established patterns (§1-6)
+- Then: Articulate unique value propositions where they exist (§7)
+- Finally: Identify alignment as a feature, not a limitation (§8)
+
+Embracing alignment with standards like TRAPI, Biolink, and the Fuzzy-to-Fact pattern is a strength—it means the work builds on proven foundations rather than reinventing them.
+
+---
+
+## 9. Research Directions Informed by Prior Art
 
 ### Immediate Opportunities
 
@@ -351,3 +419,5 @@ cross_references: {
 | 1.0.0 | 2026-01-10 | Initial prior art documentation |
 | 1.1.0 | 2026-01-10 | Added Research Context framing, Novel Contributions section, and Key Terms appendix |
 | 1.2.0 | 2026-01-10 | Added §7.5 Node/Edge separation pattern; updated cross-ref count to 23 |
+| 1.3.0 | 2026-01-10 | Added §7.6 Competency Questions alignment with BTE-RAG benchmarks |
+| 1.4.0 | 2026-01-10 | Added §8 quantitative evidence and prior art documentation value |

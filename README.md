@@ -2,6 +2,8 @@
 
 FastMCP wrappers for essential life sciences APIs and datasets. A microservices-based approach to accelerate scientific research by providing MCP server access to biological databases, gene nomenclature services, protein interaction networks, and drug-target databases.
 
+> **Prior Art & Research Context:** This project builds on 20+ years of bioinformatics API design (STRING, STITCH, NCATS Translator) and aligns with emerging standards for LLM knowledge augmentation. For established patterns, key publications, and how this work fits within the broader field, see [Prior Art & Research Context](docs/prior-art-api-patterns.md).
+
 ## Vision
 
 Enable AI agents to seamlessly query the world's most important life sciences databases through the Model Context Protocol (MCP), accelerating drug discovery, drug repurposing, and biomedical research.
