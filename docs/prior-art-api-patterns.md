@@ -226,7 +226,7 @@ While grounded in prior art, this project makes several contributions that exten
 
 **Prior Art:** Each database maintains its own cross-reference format.
 
-**Our Innovation:** The **Agentic Biolink** schema defines a 22-key `cross_references` object that standardizes how entities link across databases:
+**Our Innovation:** The **Agentic Biolink** schema defines a 23-key `cross_references` object that standardizes how entities link across databases:
 
 ```python
 cross_references: {
@@ -239,6 +239,50 @@ cross_references: {
 ```
 
 **Impact:** Enables automated graph traversal: Gene → Protein → Drug → Trial without manual ID mapping.
+
+### 7.5 Separation of Node Tools from Edge Skills
+
+**Prior Art:** Traditional bioinformatics tools bundle node retrieval and relationship traversal together. BioThings Explorer federates at the API level, but doesn't distinguish between node and edge operations in its abstraction.
+
+**Our Innovation:** The architecture separates concerns into distinct layers:
+
+| Layer | Implementation | Purpose |
+|-------|----------------|---------|
+| **MCP Tools** | FastMCP servers | Verified node retrieval (entities with canonical CURIEs) |
+| **Platform Skills** | `.claude/skills/` curl workflows | Relationship edge discovery, enrichment analysis |
+| **Research Memory** | Graphiti MCP | Document research findings and validated facts |
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         GRAPH CONSTRUCTION KIT                          │
+├─────────────────────────────────────────────────────────────────────────┤
+│  TIER 1: MCP TOOLS (Verified Nodes)                                     │
+│  ├── HGNC, UniProt, ChEMBL, STRING, Open Targets, WikiPathways          │
+│  └── Purpose: Canonical entity resolution with cross-references         │
+├─────────────────────────────────────────────────────────────────────────┤
+│  TIER 2: CURL SKILLS (Relationship Edges)                               │
+│  ├── ChEMBL /mechanism: Drug → Target                                   │
+│  ├── Open Targets GraphQL: Gene → Disease associations                  │
+│  ├── STRING /enrichment: Protein Set → GO/KEGG terms                    │
+│  └── Purpose: Graph traversal without MCP overhead                      │
+├─────────────────────────────────────────────────────────────────────────┤
+│  TIER 3: GRAPHITI (Research Memory)                                     │
+│  └── add_memory: Document validated findings as structured episodes     │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+**Rationale:** MCP tools carry protocol overhead (JSON-RPC, tool schemas, envelope parsing). For high-volume edge discovery operations (e.g., fetching 50 drug mechanisms), direct curl is more efficient. Skills provide these curl patterns as documented, copy-paste recipes.
+
+**Note on Graphiti:** Graphiti is used here as a **research memory tool**—not to construct a production knowledge graph, but to document research findings, validated relationships, and discovered facts. It serves as a structured journal for the research process rather than a graph database for downstream applications.
+
+**Available Skills:**
+- `lifesciences-genomics` - Ensembl, NCBI, HGNC curl endpoints
+- `lifesciences-proteomics` - UniProt, STRING, BioGRID curl endpoints
+- `lifesciences-pharmacology` - ChEMBL, PubChem, IUPHAR curl endpoints
+- `lifesciences-clinical` - Open Targets, ClinicalTrials.gov curl endpoints
+- `lifesciences-graph-builder` - Orchestration workflow combining all tiers
+
+**Impact:** Agents can choose the right tool for the job: MCP for verified entities, curl for bulk edges, Graphiti for research documentation.
 
 ---
 
@@ -306,3 +350,4 @@ cross_references: {
 |---------|------|---------|
 | 1.0.0 | 2026-01-10 | Initial prior art documentation |
 | 1.1.0 | 2026-01-10 | Added Research Context framing, Novel Contributions section, and Key Terms appendix |
+| 1.2.0 | 2026-01-10 | Added §7.5 Node/Edge separation pattern; updated cross-ref count to 23 |
