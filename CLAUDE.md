@@ -35,7 +35,7 @@ FastMCP wrappers for essential life sciences APIs, enabling LLM agents to query 
 |----------|---------|
 | `docs/platform-engineering-rationale.md` | **Start here** - WHY we use Platform Engineering for agents |
 | `docs/competency-questions-catalog.md` | Research questions catalog for knowledge graph building |
-| `docs/adr/accepted/adr-001-v1.3.md` | Binding architecture specification (schemas, protocols, error codes) |
+| `docs/adr/accepted/adr-001-v1.4.md` | Binding architecture specification (schemas, protocols, error codes) |
 | `docs/adr/accepted/adr-002-v1.0.md` | Project Skills (the "Hardware") |
 | `docs/adr/accepted/adr-003-v1.0.md` | SpecKit SDLC (the "Operating System") |
 | `docs/adr/accepted/adr-004-v1.0.md` | FastMCP Lifecycle Management (shutdown hook antipattern) |
@@ -92,9 +92,9 @@ uv run fastmcp run src/lifesciences_mcp/servers/wikipathways.py
 
 ## Manual Testing
 
-### ClinicalTrials.gov API (Cloudflare Blocking Workaround)
+### ClinicalTrials.gov API (Cloudflare Blocking Workaround for pytest)
 
-**Issue**: ClinicalTrials.gov uses Cloudflare TLS fingerprinting that blocks Python httpx clients (403 Forbidden), while curl works fine.
+**Issue**: ClinicalTrials.gov uses Cloudflare TLS fingerprinting that blocks Python httpx clients (403 Forbidden), while MCP endpoints and curl works fine.
 
 **Root Cause**: Cloudflare bot protection detects and blocks automated Python clients. This is **NOT a code bug** - the API parameters are correct (verified via curl).
 
@@ -250,11 +250,11 @@ For detailed server documentation (API details, rate limits, workflows), see the
 
 **Note:** DrugBank requires commercial API key (`DRUGBANK_API_KEY`). Implementation complete, integration tests skipped without key.
 
-**Note:** ClinicalTrials.gov integration tests blocked by Cloudflare. See Manual Testing section above for curl-based verification.
+**Note:** ClinicalTrials.gov integration tests blocked by Cloudflare. See Manual Testing section above for curl-based verification.  This does not impact production MCP usage.
 
-**Note:** BioGRID requires free API key (`BIOGRID_API_KEY`) from https://webservice.thebiogrid.org/
+**Note:** BioGRID requires free API key (`BIOGRID_API_KEY`) from https://webservice.thebiogrid.org/.  The API key exists in the current environment.
 
-**Note:** NCBI/Entrez optionally uses `NCBI_API_KEY` for higher rate limits (3→10 req/s). Free at https://www.ncbi.nlm.nih.gov/account/settings/
+**Note:** NCBI/Entrez optionally uses `NCBI_API_KEY` for higher rate limits (3→10 req/s). Free at https://www.ncbi.nlm.nih.gov/account/settings/  . The API key exists in the current environment.
 
 ### Core Patterns
 
@@ -274,7 +274,7 @@ For detailed server documentation (API details, rate limits, workflows), see the
 
 ### Normative Schemas
 
-See [ADR-001 v1.3](docs/adr/accepted/adr-001-v1.3.md) for complete specifications:
+See [ADR-001 v1.3](docs/adr/accepted/adr-001-v1.4.md) for complete specifications:
 - **§8 Pagination Envelope** - All list tools must use
 - **§8 Error Envelope** - All errors must use with recovery hints
 - **§9 Error Code Registry** - 6 standard error codes

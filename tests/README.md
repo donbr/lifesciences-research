@@ -442,7 +442,7 @@ def check_api_available():
 
 ## Further Reading
 
-- [ADR-001: Agentic-First Architecture](../docs/adr/accepted/adr-001-v1.3.md) — Schema and protocol requirements
+- [ADR-001: Agentic-First Architecture](../docs/adr/accepted/adr-001-v1.4.md) — Schema and protocol requirements
 - [SpecKit Standard Prompt](../docs/speckit-standard-prompt-v2.md) — Test requirements in specifications
 - [Competency Questions Catalog](../docs/competency-questions-catalog.md) — Research workflows to test
 - [FastMCP Testing Patterns](https://gofastmcp.com/patterns/testing) — Framework-specific guidance

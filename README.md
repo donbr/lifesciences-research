@@ -20,19 +20,19 @@ The current best practice in computational drug discovery is an **integrative ap
 ┌─────────────────────────────────────────────────────────────┐
 │                    DRUG REPURPOSING STACK                   │
 ├─────────────────────────────────────────────────────────────┤
-│  Layer 1: Chemical/Drug                                      │
+│  Layer 1: Chemical/Drug                                     │
 │  ChEMBL → PubChem → DrugBank                                │
 ├─────────────────────────────────────────────────────────────┤
-│  Layer 2: Target/Protein                                     │
-│  UniProt → STRING → IUPHAR/GtoPdb → STITCH                  │
+│  Layer 2: Target/Protein                                    │
+│  UniProt → STRING → IUPHAR/GtoPdb                           │
 ├─────────────────────────────────────────────────────────────┤
-│  Layer 3: Gene/Genomics                                      │
+│  Layer 3: Gene/Genomics                                     │
 │  HGNC → Ensembl → NCBI/Entrez                               │
 ├─────────────────────────────────────────────────────────────┤
-│  Layer 4: Disease/Phenotype                                  │
+│  Layer 4: Disease/Phenotype                                 │
 │  OMIM → Orphanet → Open Targets                             │
 ├─────────────────────────────────────────────────────────────┤
-│  Layer 5: Knowledge Integration                              │
+│  Layer 5: Knowledge Integration                             │
 │  Open Targets Platform (aggregates all above)               │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -53,7 +53,7 @@ This makes Open Targets an excellent starting point for AI-driven drug discovery
 
 ---
 
-## Planned MCP Servers
+## MCP Servers
 
 ### Tier 0: Strategic Priority (Drug Discovery Core)
 
@@ -77,7 +77,7 @@ This makes Open Targets an excellent starting point for AI-driven drug discovery
 | Server | API | Status | Description |
 |--------|-----|--------|-------------|
 | `iuphar-mcp` | [GtoPdb](https://www.guidetopharmacology.org/) | **✅ Complete** | Pharmacological targets, ligand-receptor interactions - 59 tests passing ([spec](specs/011-iuphar-mcp-server/)) |
-| `stitch-mcp` | [STITCH](http://stitch.embl.de/) | Planned | Chemical-protein interactions |
+| `stitch-mcp` | [STITCH](http://stitch.embl.de/) | Out of Scope | Chemical-protein interactions |
 | `pubchem-mcp` | [PubChem](https://pubchem.ncbi.nlm.nih.gov/) | **✅ Complete** | Chemical structures, cross-references - 85 tests passing ([spec](specs/010-pubchem-mcp-server/)) |
 
 ### Tier 3: Pathways & Clinical Trials
@@ -86,9 +86,9 @@ This makes Open Targets an excellent starting point for AI-driven drug discovery
 |--------|-----|--------|-------------|
 | `wikipathways-mcp` | [WikiPathways](https://www.wikipathways.org/) | **✅ Complete** | Biological pathways - 4 tools (search, get pathway, gene pathways, components) ([spec](specs/012-wikipathways-mcp-server/)) |
 | `clinicaltrials-mcp` | [ClinicalTrials.gov](https://clinicaltrials.gov/) | **✅ Complete** | Clinical trial data - 3 tools, 13 unit tests ([spec](specs/013-clinicaltrials-mcp-server/)) |
-| `kegg-mcp` | [KEGG](https://www.kegg.jp/) | Planned | Metabolic/signaling pathways |
-| `omim-mcp` | [OMIM](https://omim.org/) | Planned | Genetic disorders |
-| `orphanet-mcp` | [Orphanet](https://www.orpha.net/) | Planned | Rare diseases |
+| `kegg-mcp` | [KEGG](https://www.kegg.jp/) | Backlog | Metabolic/signaling pathways |
+| `omim-mcp` | [OMIM](https://omim.org/) | Backlog | Genetic disorders |
+| `orphanet-mcp` | [Orphanet](https://www.orpha.net/) | Backlog | Rare diseases |
 
 ### Tier 4: Genomics & Identifiers
 
@@ -102,7 +102,7 @@ This makes Open Targets an excellent starting point for AI-driven drug discovery
 **Completion Status:**
 - ✅ **12 servers operational** - HGNC, UniProt, ChEMBL, Open Targets, STRING, BioGRID, IUPHAR/GtoPdb, PubChem, Ensembl, Entrez, WikiPathways, ClinicalTrials.gov
 - ⛔ **1 server blocked** - DrugBank (requires commercial API key)
-- 🔜 **4 servers planned** - STITCH, KEGG, OMIM, Orphanet
+- 🔜 **3 servers in the backlog** - KEGG, OMIM, Orphanet
 
 **Test Coverage:**
 - Total tests: 691 passing (integration + unit combined)
@@ -283,7 +283,7 @@ await mcp.call_tool("clinicaltrials_search_trials", {
 
 > **New to this project?** Read [Platform Engineering for AI-Augmented Development](docs/platform-engineering-rationale.md) first to understand our approach to AI-assisted development.
 
-For binding technical specifications, see [ADR-001 v1.3](docs/adr/accepted/adr-001-v1.3.md).
+For binding technical specifications, see [ADR-001 v1.3](docs/adr/accepted/adr-001-v1.4.md).
 
 ### Design Principles
 
@@ -329,7 +329,7 @@ DRUGBANK_API_KEY=your-key-here  # Get from https://go.drugbank.com/
 
 ## Developing New Servers (SpecKit v2)
 
-We provide a standardized process for creating new MCP servers that comply with our [Architectural Standards](docs/adr/accepted/adr-001-v1.3.md).
+We provide a standardized process for creating new MCP servers that comply with our [Architectural Standards](docs/adr/accepted/adr-001-v1.4.md).
 
 - **[SpecKit Standard Prompt v2](docs/speckit-standard-prompt-v2.md)**: The "Master Prompt" for generating high-quality, compliant MCP servers.
 - **[Scaffold Process Timeline](docs/speckit-scaffold-process-timeline-v2.md)**: The step-by-step lifecycle for scaffolding, implementing, and verifying new servers.
@@ -411,7 +411,7 @@ We use these tools to perform real-world analysis. All outputs are validated for
 
 **Architecture Documentation:**
 - [Architecture](architecture/README.md) - Complete architecture analysis with 13,505 lines of code across 56 Python modules
-- [ADR-001 v1.3](docs/adr/accepted/adr-001-v1.3.md) - Binding architecture specification (Fuzzy-to-Fact protocol)
+- [ADR-001 v1.3](docs/adr/accepted/adr-001-v1.4.md) - Binding architecture specification (Fuzzy-to-Fact protocol)
 - [Component Inventory](architecture/docs/01_component_inventory.md) - Detailed component reference
 - [API Reference](architecture/docs/04_api_reference.md) - Usage guide with examples
 - [Competency Questions Catalog](docs/competency-questions-catalog.md) - Research questions for knowledge graph building with the lifesciences-graph-builder skill
