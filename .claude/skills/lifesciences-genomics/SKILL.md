@@ -115,6 +115,18 @@ curl -s "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/elink.fcgi?dbfrom=gene&db
 | Ensembl | 15 req/s | No auth required |
 | NCBI | 3 req/s | 10 req/s with NCBI_API_KEY |
 
+## Query Best Practices
+
+### Human-Centric Defaults
+- **Filter to human by default** unless performing comparative genomics
+- Use `human[orgn]` in NCBI searches, `homo_sapiens` for Ensembl
+- Only omit organism filter when explicitly comparing across species (e.g., ortholog analysis)
+
+### Efficient Querying
+- Use `page_size=10` for exploration
+- Use cross-reference endpoints to resolve IDs rather than multiple searches
+- Prefer Ensembl IDs (ENSG*) for programmatic access
+
 ## See Also
 
 - [references/ensembl-endpoints.md](references/ensembl-endpoints.md) - Full endpoint reference

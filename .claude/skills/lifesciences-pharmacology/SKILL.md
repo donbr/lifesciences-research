@@ -171,6 +171,23 @@ curl -s "https://www.ebi.ac.uk/chembl/api/data/drug_indication?molecule_chembl_i
 | DrugBank | Varies | Yes (commercial) |
 | IUPHAR | 10 req/s | No |
 
+## Query Best Practices
+
+### Drug Discovery vs Repurposing
+- **Drug repurposing**: Use `max_phase≥2` filter (want clinical validation, shorter approval path)
+- **General discovery**: No phase filter (include preclinical tools, mechanism probes, research reagents)
+- **Target validation**: No phase filter needed for mechanism studies
+
+### Query Efficiency
+- Check mechanisms (`/mechanism` endpoint) before bioactivity data
+- Use `target_chembl_id` for reverse lookups (find drugs for target)
+- Limit activity queries with `&limit=10` for exploration
+
+### Common Pitfalls
+- Don't filter by phase for mechanism discovery
+- Don't assume approved drugs are the only useful compounds
+- Preclinical tool compounds often have better selectivity data
+
 ## See Also
 
 - [references/chembl-resources.md](references/chembl-resources.md) - ChEMBL resource endpoints
