@@ -192,7 +192,7 @@ We invite you to explore, extend, and challenge these patterns.
 |----------|---------|
 | [ADR-002: Project Skills](adr/accepted/adr-002-v1.0.md) | Skills as Platform Engineering (the "tools") |
 | [ADR-003: SpecKit SDLC](adr/accepted/adr-003-v1.0.md) | Specification-Driven Development (the "process") |
-| [ADR-001: Agentic Biolink](adr/accepted/adr-001-v1.3.md) | The binding technical specification |
+| [ADR-001: Agentic Biolink](adr/accepted/adr-001-v1.4.md) | The binding technical specification |
 | [Competency Questions Catalog](competency-questions-catalog.md) | Research questions for knowledge graph building |
 | *Team Topologies* (Pais & Skelton, 2019) | The original framework |
 

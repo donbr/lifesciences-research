@@ -6,7 +6,7 @@ This prompt template serves as the **enforcement mechanism** for the Life Scienc
 
 | ADR | Title | Application Mode | Key Mandate |
 | :--- | :--- | :--- | :--- |
-| **[ADR-001](../docs/adr/accepted/adr-001-v1.3.md)** | **Agentic-First Architecture** | 🔴 **Explicit Constraint** | Async-First, Fuzzy-to-Fact, Canonical Envelopes. |
+| **[ADR-001](../docs/adr/accepted/adr-001-v1.4.md)** | **Agentic-First Architecture** | 🔴 **Explicit Constraint** | Async-First, Fuzzy-to-Fact, Canonical Envelopes. |
 | **[ADR-002](../docs/adr/accepted/adr-002-v1.0.md)** | **Platform Skills** | 🟢 **Foundational** | Skills like `scaffold-fastmcp` MUST be used over manual coding. |
 | **[ADR-003](../docs/adr/accepted/adr-003-v1.0.md)** | **SpecKit SDLC** | 🟢 **Foundational** | The `/specify` → `/plan` → `/implement` workflow itself. |
 | **[ADR-004](../docs/adr/accepted/adr-004-v1.0.md)** | **Lifecycle Management** | 🔴 **Explicit Constraint** | Module-level singleton pattern; `@mcp.on_event` is **FORBIDDEN**. |
