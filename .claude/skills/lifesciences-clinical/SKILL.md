@@ -206,6 +206,26 @@ curl -s "https://clinicaltrials.gov/api/v2/studies?query.intr=venetoclax&filter.
 - **ClinicalTrials.gov** uses Cloudflare protection that may block Python httpx clients. Use curl for reliable access.
 - **Open Targets** requires Ensembl Gene IDs (ENSG*) for target queries; use EFO IDs for disease queries.
 
+## Query Best Practices
+
+### Clinical Trials
+- **Default status=RECRUITING** for active research landscape
+- Use phase filter only for specific analysis:
+  - **PHASE3+**: Commercialization/late-stage pipeline analysis
+  - **PHASE1/2**: Early pipeline, first-in-human studies
+  - **No filter**: Full landscape view (all phases)
+- Don't assume phase filter is always needed
+
+### Open Targets
+- Requires Ensembl Gene IDs (ENSG*) for target queries
+- Use EFO IDs for disease queries (search first to resolve)
+- Use nested GraphQL queries to minimize API calls
+
+### Common Pitfalls
+- Don't filter by PHASE3+ for general drug discovery
+- Recruiting trials are most relevant for collaboration opportunities
+- Completed trials provide outcome data but may be outdated
+
 ## See Also
 
 - [references/opentargets-schema.md](references/opentargets-schema.md) - GraphQL schema reference

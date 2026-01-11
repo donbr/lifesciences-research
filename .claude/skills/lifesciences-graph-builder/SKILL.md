@@ -181,6 +181,26 @@ curl -s "https://clinicaltrials.gov/api/v2/studies?query.intr=venetoclax&filter.
 | ASSOCIATED_WITH | Gene | Disease | score, evidence_sources |
 | MEMBER_OF | Gene | Pathway | - |
 
+## Query Best Practices
+
+### Gene Discovery (Human-Centric)
+- **Default to species=9606** (human) for gene/protein searches
+- Use `page_size=10` for exploration, `page_size=50` for batch operations
+- Use `slim=True` for batch operations to reduce token usage
+- Only use `organism=null` for comparative genomics across species
+
+### Drug Discovery vs Repurposing
+- **Drug repurposing**: Use `max_phase≥2` (clinical validation, shorter approval path)
+- **General discovery**: No phase filter (include preclinical tools, mechanism probes)
+- Check mechanisms before bioactivity data
+
+### Clinical Landscape
+- **Default status=RECRUITING** for active research
+- Use phase filter only for specific analysis:
+  - PHASE3+ for commercialization analysis
+  - PHASE1/2 for early pipeline
+  - No filter for full landscape
+
 ## See Also
 
 - **lifesciences-genomics**: Ensembl, NCBI, HGNC endpoints
