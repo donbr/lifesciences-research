@@ -43,7 +43,7 @@ async def get_client() -> EntrezClient:
 @mcp.tool
 async def search_genes(
     query: str,
-    organism: str | None = None,
+    organism: str | None = "human",
     page_size: int = 50,
     cursor: str | None = None,
 ) -> PaginationEnvelope[GeneSearchCandidate] | ErrorEnvelope:
@@ -55,8 +55,8 @@ async def search_genes(
     Args:
         query: Search term (gene symbol, name, description, or natural language).
                Minimum 2 characters required.
-        organism: Optional organism filter (e.g., "human", "Homo sapiens", "mouse").
-                  Default: all organisms.
+        organism: Organism filter (e.g., "human", "Homo sapiens", "mouse").
+                  Default: "human" (Homo sapiens). Pass None for all organisms.
         page_size: Number of results per page (1-100, default 50).
         cursor: Opaque cursor for pagination (from previous response).
 

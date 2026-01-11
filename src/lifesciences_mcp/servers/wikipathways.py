@@ -36,7 +36,7 @@ async def get_client() -> WikiPathwaysClient:
 @mcp.tool
 async def search_pathways(
     query: str,
-    organism: str | None = None,
+    organism: str | None = "Homo sapiens",
     slim: bool = False,
     cursor: str | None = None,
     page_size: int = 50,
@@ -48,7 +48,8 @@ async def search_pathways(
     Args:
         query: Search term (pathway name, description, gene, or natural language query).
                Minimum 2 characters required.
-        organism: Optional organism filter (e.g., "Homo sapiens", "human").
+        organism: Organism filter (exact scientific name, e.g., "Homo sapiens", "Mus musculus").
+                  Default: "Homo sapiens". Pass None for all organisms.
         slim: If true, return only id/name/organism/score (~20 tokens per entity).
               Default false returns full candidates.
         cursor: Opaque cursor for pagination. Pass from previous response for next page.
@@ -99,7 +100,7 @@ async def get_pathway(pathway_id: str) -> dict | ErrorEnvelope:
 @mcp.tool
 async def get_pathways_for_gene(
     gene_id: str,
-    organism: str | None = None,
+    organism: str | None = "Homo sapiens",
     cursor: str | None = None,
     page_size: int = 50,
 ) -> PaginationEnvelope | ErrorEnvelope:
@@ -112,9 +113,8 @@ async def get_pathways_for_gene(
         gene_id: Gene identifier (symbol like "BRCA1", Entrez ID like "672",
                  or Ensembl ID like "ENSG00000012048").
                  Case-insensitive for gene symbols (converted to uppercase).
-        organism: Optional organism filter (e.g., "Homo sapiens").
-                  Must be exact scientific name (no fuzzy matching).
-                  Omit to search across all organisms.
+        organism: Organism filter (exact scientific name, e.g., "Homo sapiens").
+                  Default: "Homo sapiens". Pass None for all organisms.
         cursor: Opaque cursor for pagination. Pass from previous response for next page.
         page_size: Number of results per page (1-100, default 50).
 
