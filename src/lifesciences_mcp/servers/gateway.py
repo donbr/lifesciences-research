@@ -1,6 +1,6 @@
 """Life Sciences MCP Gateway Server - Unified access to all life sciences APIs.
 
-This gateway server composes all 13 individual MCP servers into a single
+This gateway server composes all 12 individual MCP servers into a single
 unified server for deployment to FastMCP Cloud.
 
 Tools are accessible with prefixes:
