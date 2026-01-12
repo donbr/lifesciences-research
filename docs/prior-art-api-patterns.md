@@ -321,6 +321,27 @@ The [Hybrid LLM-KG Framework (2025)](https://jastt.org/index.php/jasttpath/artic
 
 See: `docs/competency-questions-catalog.md`
 
+### 7.7 Self-Healing Knowledge Graphs
+
+**Prior Art:** "Static" knowledge graphs (e.g., download an RDF dump) suffer from "Data Rot" (link rot, obsolete IDs) within months.
+
+**Our Innovation:** The "Self-Healing" pattern (validated in CQ7) treats ID resolution failures not as exceptions, but as triggers for re-grounding:
+1.  **Detect**: `MONDO:0014109` -> "Obsolete"
+2.  **Search**: Web Search/LLM lookup for "MONDO:0014109 replacement"
+3.  **Heal**: Update graph node to `MONDO:0800044` (NGLY1-deficiency)
+
+**External Validation (2025):**
+This aligns with 2024-2025 research on "Automated Construction and Refinement" of Medical KGs. The **Harvard Knowledge Graph Agent** (2025) and **KARE Framework** (2024) similarly use LLM-driven agents to continuously refine graphs, mitigating the "static" limitation of traditional databases.
+
+### 7.8 Triangulated Validation
+
+**Prior Art:** Systems rely on single-source truth (e.g., "If ChEMBL says X, X is true").
+
+**Our Innovation:** We recognize that purely structured sources have "Silent Data Gaps" (e.g., recent Phase 3 drugs like Retatrutide often have 0 mechanisms in ChEMBL). The **Triangulated Validation** pattern mandates:
+- **Source A**: Structured API (ChEMBL)
+- **Source B**: Unstructured Search (Web/PubMed)
+- **Logic**: If A is empty but B is rich -> Use B, flag A as outdated.
+
 ---
 
 ## 8. Why This Matters: Evidence for Structured API Access
@@ -395,6 +416,10 @@ Embracing alignment with standards like TRAPI, Biolink, and the Fuzzy-to-Fact pa
 5. Xu CH, et al. (2025). "Federated Knowledge Retrieval Elevates Large Language Model Performance on Biomedical Benchmarks." *bioRxiv*. [DOI: 10.1101/2025.08.01.668022](https://doi.org/10.1101/2025.08.01.668022)
 
 6. Wang R, et al. (2025). "Improving large language model applications in biomedicine with retrieval-augmented generation." *JAMIA*, 32(4):605. [DOI: 10.1093/jamia/ocaf021](https://doi.org/10.1093/jamia/ocaf021)
+
+7. **KARE Framework** (2024). "Knowledge Graph Community-level Retrieval for LLM Reasoning." *OpenReview*. [link](https://openreview.net/forum?id=r8qN9J6aKj)
+
+8. **Harvard Knowledge Graph Agent** (2025). "Systematic generation, review, and revision of Medical KGs." *Predictive Systems AI*. [link](https://predictivesystems.ai/research)
 
 ---
 
