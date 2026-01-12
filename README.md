@@ -1,18 +1,28 @@
-# Life Sciences MCP
+# Life Sciences MCP 🧬🤖
 
-FastMCP wrappers for essential life sciences APIs and datasets. A microservices-based approach to accelerate scientific research by providing MCP server access to biological databases, gene nomenclature services, protein interaction networks, and drug-target databases.
+> **A Model Context Protocol platform for grounding agents in live, verifiable biological truth — designed to contain data rot, not amplify it.**
 
-> **Prior Art & Research Context:** This project builds on 20+ years of bioinformatics API design (STRING, STITCH, NCATS Translator) and aligns with emerging standards for LLM knowledge augmentation. For established patterns, key publications, and how this work fits within the broader field, see [Prior Art & Research Context](docs/prior-art-api-patterns.md).
+FastMCP wrappers for essential life‑sciences APIs and datasets.  This repository exposes each upstream API as its own micro‑service so agents can ground their reasoning in well‑defined biological facts without hauling around a monolithic knowledge graph.  It is not a knowledge graph replacement; rather it is the **Structured Truth Layer** that complements graph construction and RAG systems by providing canonical identifiers, cross‑references and evidence on demand.
+
+> **Prior Art & Research Context:**  This project stands on two decades of bioinformatics API work (e.g. STRING, STITCH, NCATS Translator) and aligns with emerging standards for LLM knowledge augmentation.  For established patterns, key publications and how this work fits within the broader field, see [Prior Art & Research Context](docs/prior-art-api-patterns.md).
+
+## Why this exists
+
+Drug discovery, drug repurposing and biomedical research depend on accurate, up‑to‑date facts.  Biological identifiers go stale, APIs change, ontologies split and merge and the surface area of “truth” shifts underneath you.  We built the Life Sciences MCP so that agents – whether running on Claude, ChatGPT or any other LLM – can **ground fuzzy claims in resolvable facts**, **contain volatility to the API boundary**, and **self‑heal** when a referenced concept changes.  The key principles are:
+
+* **Containment:**  Each API/database is wrapped in its own MCP server, isolating schema drift and data rot so that one volatile domain doesn’t poison the entire reasoning loop.
+* **Correctness:**  All servers implement a **Fuzzy‑to‑Fact** protocol (search → candidate → strict lookup), ensuring canonical IDs are resolved before downstream reasoning.
+* **Self‑Healing:**  When an identifier has been deprecated or an API field changes, the server returns a structured error with a recovery hint so the agent can retry with the new canonical ID or schema.
+
+This design stance means the MCP layer can sit behind any knowledge graph or retrieval‑augmented generation system.  It doesn’t build the graph for you; it ensures the facts you plug into your graph are still correct.
 
 ## Vision
 
-Enable AI agents to seamlessly query the world's most important life sciences databases through the Model Context Protocol (MCP), accelerating drug discovery, drug repurposing, and biomedical research.
-
-**Current Status: 12 MCP servers operational** covering genes (HGNC, Ensembl, Entrez), proteins (UniProt, STRING, BioGRID), compounds (ChEMBL, PubChem), pharmacology (IUPHAR/GtoPdb), targets (Open Targets), pathways (WikiPathways), and clinical trials (ClinicalTrials.gov).
+Enable AI agents to seamlessly query the world's most important life‑sciences databases through the Model Context Protocol (MCP), accelerating drug discovery, drug repurposing, and biomedical research.  **Current status:** *12 MCP servers operational*, covering genes (HGNC, Ensembl, Entrez), proteins (UniProt, STRING, BioGRID), compounds (ChEMBL, PubChem), pharmacology (IUPHAR/GtoPdb), targets (Open Targets), pathways (WikiPathways) and clinical trials (ClinicalTrials.gov).
 
 ---
 
-## The Modern Drug Discovery Stack (2025)
+## The Modern Drug Discovery Stack (2025)
 
 The current best practice in computational drug discovery is an **integrative approach** using programmatic APIs across multiple data layers:
 
@@ -20,36 +30,22 @@ The current best practice in computational drug discovery is an **integrative ap
 ┌─────────────────────────────────────────────────────────────┐
 │                    DRUG REPURPOSING STACK                   │
 ├─────────────────────────────────────────────────────────────┤
-│  Layer 1: Chemical/Drug                                     │
+│  Layer 1: Chemical/Drug                                     │
 │  ChEMBL → PubChem → DrugBank                                │
 ├─────────────────────────────────────────────────────────────┤
-│  Layer 2: Target/Protein                                    │
+│  Layer 2: Target/Protein                                    │
 │  UniProt → STRING → IUPHAR/GtoPdb                           │
 ├─────────────────────────────────────────────────────────────┤
-│  Layer 3: Gene/Genomics                                     │
+│  Layer 3: Gene/Genomics                                     │
 │  HGNC → Ensembl → NCBI/Entrez                               │
 ├─────────────────────────────────────────────────────────────┤
-│  Layer 4: Disease/Phenotype                                 │
-│  OMIM → Orphanet → Open Targets                             │
+│  Layer 4: Disease/Phenotype                                 │
+│  OMIM → Orphanet → Open Targets                             │
 ├─────────────────────────────────────────────────────────────┤
-│  Layer 5: Knowledge Integration                             │
-│  Open Targets Platform (aggregates all above)               │
+│  Layer 5: Knowledge Integration                             │
+│  Open Targets Platform (aggregates all above)               │
 └─────────────────────────────────────────────────────────────┘
 ```
-
----
-
-## Key Insight: Open Targets as a "Meta-API"
-
-**[Open Targets Platform](https://platform.opentargets.org/)** is emerging as the single most valuable API for drug discovery because it:
-
-- **Aggregates** ChEMBL, UniProt, Ensembl, and disease databases into a unified interface
-- **Provides** a modern GraphQL API for flexible querying
-- **Maps** targets to diseases with genetic and experimental evidence
-- **Enables** drug repurposing by connecting approved drugs to new indications
-- **Already does** the integration work you'd otherwise do manually
-
-This makes Open Targets an excellent starting point for AI-driven drug discovery workflows.
 
 ---
 
@@ -111,66 +107,47 @@ This makes Open Targets an excellent starting point for AI-driven drug discovery
 
 ---
 
-## Agentic Architecture (Team of Tools)
+## Agentic Architecture (Team of Tools)
 
-We are building a **Team of Agents** where each specialized tool plays a role in the scientific reasoning loop.
+In our agentic workflows we build a **Team of Agents** where each specialized tool plays a role in the scientific reasoning loop.  Rather than rendering interactive Mermaid diagrams (which GitHub Pages doesn’t support by default), we pre‑render the architecture as a static image.  If you are viewing this README on GitHub Pages, the diagram below should render correctly; the source for this image lives in `docs/images/team_of_tools.png`.
 
-```mermaid
-graph TD
-    subgraph "Reasoning Layer (Strategies)"
-        Literature[Literature Agent]
-        Validator[Validation Agent]
-    end
+![Agentic Architecture – Team of Tools](images/team_of_tools.png)
 
-    subgraph "Structured Truth Layer (Life Sciences MCP - 12 Operational)"
-        HGNC["HGNC ✅<br/>(Gene Identity)"]
-        UniProt["UniProt ✅<br/>(Protein Function)"]
-        OpenTargets["Open Targets ✅<br/>(Disease)"]
-        ChEMBL["ChEMBL ✅<br/>(Compounds)"]
-        STRING["STRING ✅<br/>(Interactions)"]
-        WikiPathways["WikiPathways ✅<br/>(Pathways)"]
-        ClinicalTrials["ClinicalTrials.gov ✅<br/>(Trials)"]
-    end
+### The Structured Truth Layer
 
-    subgraph "Unstructured Knowledge Layer"
-        PubMed["(PubMed/BioRxiv)"]
-        FullText["(PDFs/Figures)"]
-    end
+This repository (`lifesciences-research`) acts as the **Grounding Engine**.  When a Literature Agent reads a paper and claims “Drug X targets Protein Y,” it uses this MCP to:
 
-    Literature -->|Reads| PubMed
-    Literature -->|Extracts Claims| FullText
-    Literature -->|Queries| Validator
-
-    Validator -->|Grounds Gene Terms| HGNC
-    Validator -->|Validates Proteins| UniProt
-    Validator -->|Checks Disease Evidence| OpenTargets
-    Validator -->|Finds Compounds| ChEMBL
-    Validator -->|Discovers Interactions| STRING
-    Validator -->|Analyzes Pathways| WikiPathways
-    Validator -->|Finds Clinical Trials| ClinicalTrials
-
-    style Validator fill:#e1f5fe,stroke:#01579b
-    style Literature fill:#f3e5f5,stroke:#4a148c
-```
-
-### The "Structured Truth Layer"
-This repository (`lifesciences-research`) acts as the **Grounding Engine**. When a Literature Agent reads a paper and claims "Drug X targets Protein Y," it uses this MCP to:
-1.  **Resolve** "Protein Y" to a precise UniProt ID (resolving synonyms).
-2.  **Validate** if "Drug X" actually binds to "Protein Y" in ChEMBL/OpenTargets.
-3.  **Harden** the unstructured text into a structured Knowledge Graph.
+1. **Resolve** “Protein Y” to a precise UniProt ID (resolving synonyms).
+2. **Validate** if “Drug X” actually binds to “Protein Y” in ChEMBL/Open Targets.
+3. **Harden** the unstructured text into a structured knowledge graph.
 
 ---
 
-## Quick Start
+## Quick Start
 
 ```bash
 # Install dependencies
 uv sync --extra dev
 
-# =============================================================================
-# Run Individual MCP Servers
-# =============================================================================
+```
 
+### Choosing Between the Gateway and Individual Servers
+
+Most users start by running a **single MCP server** for a specific task.  Each service (`hgnc-mcp`, `chembl-mcp`, etc.) runs as its own microservice and only exposes the tools relevant to that API.  This keeps your environment lean and ensures the agent’s context window isn’t filled with unused schemas.
+
+When you need to orchestrate queries across multiple domains—e.g. “resolve a gene, find its protein interactions, then fetch related trials”—use the **gateway**.  The gateway process dynamically registers all available MCP servers and exposes their tools behind a single endpoint.  Importantly, the gateway does **not** inflate the LLM’s token budget by default; tools are only loaded when you call them.  Start it with:
+
+```bash
+uv run fastmcp run src/lifesciences_mcp/servers/gateway.py
+```
+
+For local development or targeted tasks, run individual servers as shown in the original quick‑start commands.  For multi‑hop workflows or production use, run the gateway and call only the tools you need.
+
+---
+
+### Run Individual MCP Servers
+
+```bash
 # Tier 0: Drug Discovery Core
 uv run fastmcp run src/lifesciences_mcp/servers/chembl.py        # ChEMBL compounds & bioactivity (✅ 112 tests)
 uv run fastmcp run src/lifesciences_mcp/servers/opentargets.py   # Target-disease associations (✅ 9 tests)
@@ -193,10 +170,13 @@ uv run fastmcp run src/lifesciences_mcp/servers/clinicaltrials.py # Clinical tri
 # Tier 4: Genomics & Identifiers
 uv run fastmcp run src/lifesciences_mcp/servers/ensembl.py       # Genomic annotations (✅ 86 tests)
 uv run fastmcp run src/lifesciences_mcp/servers/entrez.py        # NCBI gene database (✅ 58 tests)
+```
 
-# =============================================================================
-# Run Tests
-# =============================================================================
+### Run Tests
+
+```bash
+# Install dependencies
+uv sync --extra dev
 
 # Run all tests
 uv run pytest tests/ -v
