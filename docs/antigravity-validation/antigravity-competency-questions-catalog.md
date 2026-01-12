@@ -8,23 +8,23 @@
 
 ## Quick Reference
 
-| cq# | Category | Question Summary | group_id | Source |
-|-----|----------|------------------|----------|--------|
-| cq1 | FOP Mechanism | Palovarotene mechanism for FOP | `cq1-fop-mechanism` | DrugMechDB |
-| cq2 | FOP Repurposing | BMP pathway drug repurposing | `cq2-fop-repurposing` | DrugMechDB |
-| cq3 | AD Gene Networks | Alzheimer's gene-protein interactions | `cq3-alzheimers-gene-network` | DALK (Li et al.) |
-| cq4 | AD Therapeutics | Amyloid/Tau targeting drugs | `cq4-alzheimers-therapeutics` | DALK (Li et al.) |
-| cq5 | MAPK Regulation | Directed signaling cascades | `cq5-mapk-regulatory-cascade` | STRING 2025 |
-| cq6 | TF Networks | BRCA1 regulatory network | `cq6-brca1-regulatory-network` | STRING 2025 |
-| cq7 | Multi-Hop Repurposing | NGLY1 federated drug discovery | `cq7-ngly1-drug-repurposing` | BioThings Explorer |
-| cq8 | Synthetic Lethality | ARID1A-deficient Ovarian Cancer | `cq8-arid1a-synthetic-lethality` | Original |
-| cq9 | Drug Safety | Dasatinib off-target risks | `cq9-dasatinib-safety` | Original |
-| cq10 | Orphan Drug | Huntington's novel targets | `cq10-huntingtons-novel-targets` | Original |
-| cq11 | Pathway Validation | p53-MDM2-Nutlin axis | `cq11-p53-mdm2-nutlin` | Original |
-| cq12 | Health Emergencies | 2026 clinical trial priorities | `cq12-health-emergencies-2026` | Original |
-| cq13 | Commercialization | High-investment Phase 3 trials | `cq13-high-commercialization-trials` | Original |
-| cq14 | Synthetic Lethality | TP53 SL partners from Feng et al. | `cq14-feng-synthetic-lethality` | Feng et al. 2022 |
-| cq15 | CAR-T Regulatory | FDA/EMA milestone velocity | `cq15-car-t-regulatory` | Original |
+| cq# | Category | Question Summary | Validation | group_id | Source |
+|-----|----------|------------------|------------|----------|--------|
+| cq1 | FOP Mechanism | Palovarotene mechanism for FOP | ✅ Validated | `cq1-fop-mechanism` | DrugMechDB |
+| cq2 | FOP Repurposing | BMP pathway drug repurposing | ✅ Validated | `cq2-fop-repurposing` | DrugMechDB |
+| cq3 | AD Gene Networks | Alzheimer's gene-protein interactions | ✅ Validated | `cq3-alzheimers-gene-network` | DALK (Li et al.) |
+| cq4 | AD Therapeutics | Amyloid/Tau targeting drugs | 🔄 Pending | `cq4-alzheimers-therapeutics` | DALK (Li et al.) |
+| cq5 | MAPK Regulation | Directed signaling cascades | 🔄 Pending | `cq5-mapk-regulatory-cascade` | STRING 2025 |
+| cq6 | TF Networks | BRCA1 regulatory network | 🔄 Pending | `cq6-brca1-regulatory-network` | STRING 2025 |
+| cq7 | Multi-Hop Repurposing | NGLY1 federated drug discovery | ✅ Validated | `cq7-ngly1-drug-repurposing` | BioThings Explorer |
+| cq8 | Synthetic Lethality | ARID1A-deficient Ovarian Cancer | 🔄 Pending | `cq8-arid1a-synthetic-lethality` | Original |
+| cq9 | Drug Safety | Dasatinib off-target risks | 🔄 Pending | `cq9-dasatinib-safety` | Original |
+| cq10 | Orphan Drug | Huntington's novel targets | 🔄 Pending | `cq10-huntingtons-novel-targets` | Original |
+| cq11 | Pathway Validation | p53-MDM2-Nutlin axis | 🔄 Pending | `cq11-p53-mdm2-nutlin` | Original |
+| cq12 | Health Emergencies | 2026 clinical trial priorities | 🔄 Pending | `cq12-health-emergencies-2026` | Original |
+| cq13 | Commercialization | High-investment Phase 3 trials | ✅ Validated | `cq13-high-commercialization-trials` | Original |
+| cq14 | Synthetic Lethality | TP53 SL partners from Feng et al. | 🔄 Pending | `cq14-feng-synthetic-lethality` | Feng et al. 2022 |
+| cq15 | CAR-T Regulatory | FDA/EMA milestone velocity | 🔄 Pending | `cq15-car-t-regulatory` | Original |
 
 **Validation Files**: `docs/competency-questions/validiation/2026{month}{day}/cq{N}-*.md`
 
@@ -71,11 +71,11 @@
 ```
 
 **Workflow**:
-1. **Anchor**: `hgnc_search_genes("ARID1A")` → HGNC:11110 (Pattern C: Anchor)
-2. **Edge Discovery**: **Triangulate**. Use Web Search ("ARID1A synthetic lethality partner") to find EZH2. *Note: Validated Pattern A (Silent Data Gap in structured DBs).*
-3. **Compound Resolution**: `chembl_search_compounds("EZH2 inhibitor")` → Tazemetostat
-4. **Mechanism Check**: curl ChEMBL /mechanism → Confirm EZH2 inhibition
-5. **Persist**: `mcp__graphiti-docker__add_memory(group_id="cq1-synthetic-lethality")`
+1. **Anchor**: `pubchem_search_compounds("Palovarotene")` → CHEMBL:2105648 (Pattern C: Anchor)
+2. **Mechanism**: `chembl_get_compound("CHEMBL:2105648")` → Identify RARG agonist activity
+3. **Pathway**: `wikipathways_search_pathways("BMP signaling")` → Identify crosstalk between Retinoic Acid and BMP pathways
+4. **Connect**: `pubmed_search_articles("Palovarotene RARG ACVR1 FOP")` → Confirm mechanism of action (inhibition of heterotopic ossification)
+5. **Persist**: `mcp__graphiti-docker__add_memory(group_id="cq1-fop-mechanism")`
 
 **Validation**: `docs/antigravity-validation/competency-validations/cq1-synthetic-lethality-validation.md`
 
