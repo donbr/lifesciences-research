@@ -166,7 +166,7 @@ The researcher asks a question. The platform handles the complexity. Knowledge e
    Ask a research question. Get a connected graph with provenance.
 
 2. **Reproducible Workflows**
-   The [Competency Questions Catalog](competency-questions-catalog.md) documents 7 research scenarios that can be re-run at any time.
+   The [Competency Questions Catalog](competency-questions/competency-questions-catalog.md) documents 7 research scenarios that can be re-run at any time.
 
 3. **Consistent AI Outputs**
    Platform Skills ensure every MCP server follows the same patterns. No more integration surprises.
@@ -193,7 +193,7 @@ We invite you to explore, extend, and challenge these patterns.
 | [ADR-002: Project Skills](adr/accepted/adr-002-v1.0.md) | Skills as Platform Engineering (the "tools") |
 | [ADR-003: SpecKit SDLC](adr/accepted/adr-003-v1.0.md) | Specification-Driven Development (the "process") |
 | [ADR-001: Agentic Biolink](adr/accepted/adr-001-v1.4.md) | The binding technical specification |
-| [Competency Questions Catalog](competency-questions-catalog.md) | Research questions for knowledge graph building |
+| [Competency Questions Catalog](competency-questions/competency-questions-catalog.md) | Research questions for knowledge graph building |
 | *Team Topologies* (Pais & Skelton, 2019) | The original framework |
 
 ---

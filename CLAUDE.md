@@ -34,7 +34,7 @@ FastMCP wrappers for essential life sciences APIs, enabling LLM agents to query 
 | Document | Purpose |
 |----------|---------|
 | `docs/platform-engineering-rationale.md` | **Start here** - WHY we use Platform Engineering for agents |
-| `docs/competency-questions-catalog.md` | Research questions catalog for knowledge graph building |
+| `docs/competency-questions/competency-questions-catalog.md` | Research questions catalog for knowledge graph building |
 | `docs/adr/accepted/adr-001-v1.4.md` | Binding architecture specification (schemas, protocols, error codes) |
 | `docs/adr/accepted/adr-002-v1.0.md` | Project Skills (the "Hardware") |
 | `docs/adr/accepted/adr-003-v1.0.md` | SpecKit SDLC (the "Operating System") |

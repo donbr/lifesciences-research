@@ -319,7 +319,7 @@ The [Hybrid LLM-KG Framework (2025)](https://jastt.org/index.php/jasttpath/artic
 1. **Scope Definition** - Define what the knowledge graph should answer
 2. **Validation Framework** - Benchmark queries to verify graph completeness
 
-See: `docs/competency-questions-catalog.md`
+See: `docs/competency-questions/competency-questions-catalog.md`
 
 ### 7.7 Self-Healing Knowledge Graphs
 

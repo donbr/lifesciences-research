@@ -109,7 +109,7 @@ The current best practice in computational drug discovery is an **integrative ap
 
 ## Agentic Architecture (Team of Tools)
 
-In our agentic workflows we build a **Team of Agents** where each specialized tool plays a role in the scientific reasoning loop.  Rather than rendering interactive Mermaid diagrams (which GitHub Pages doesn’t support by default), we pre‑render the architecture as a static image.  If you are viewing this README on GitHub Pages, the diagram below should render correctly; the source for this image lives in `docs/images/team_of_tools.png`.
+In our agentic workflows we build a **Team of Agents** where each specialized tool plays a role in the scientific reasoning loop.
 
 ![Agentic Architecture – Team of Tools](images/team_of_tools.png)
 
@@ -135,7 +135,7 @@ uv sync --extra dev
 
 Most users start by running a **single MCP server** for a specific task.  Each service (`hgnc-mcp`, `chembl-mcp`, etc.) runs as its own microservice and only exposes the tools relevant to that API.  This keeps your environment lean and ensures the agent’s context window isn’t filled with unused schemas.
 
-When you need to orchestrate queries across multiple domains—e.g. “resolve a gene, find its protein interactions, then fetch related trials”—use the **gateway**.  The gateway process dynamically registers all available MCP servers and exposes their tools behind a single endpoint.  Importantly, the gateway does **not** inflate the LLM’s token budget by default; tools are only loaded when you call them.  Start it with:
+When you need to orchestrate queries across multiple domains—e.g. "resolve a gene, find its protein interactions, then fetch related trials"—use the **gateway**.  The gateway composes all 12 MCP servers into a single unified endpoint with prefixed tool names (e.g., `hgnc_search_genes`, `chembl_get_compound`).  This static composition provides predictable behavior and explicit control over which tools are exposed.  Start it with:
 
 ```bash
 uv run fastmcp run src/lifesciences_mcp/servers/gateway.py
@@ -381,7 +381,7 @@ We use these tools to perform real-world analysis. All outputs are validated for
 ### Related Projects and Showcases
 
 **Research Workflows:**
-- **[Competency Questions Catalog](docs/competency-questions-catalog.md)** - 7 research scenarios (synthetic lethality, drug safety, orphan drug discovery) with re-run instructions
+- **[Competency Questions Catalog](docs/competency-questions/competency-questions-catalog.md)** - 7 research scenarios (synthetic lethality, drug safety, orphan drug discovery) with re-run instructions
 - **[Competency Question Tests](tests/integration/test_competency_questions_mcp.py)** - Integration tests validating multi-server workflows
 
 **Related Projects:**
@@ -394,7 +394,7 @@ We use these tools to perform real-world analysis. All outputs are validated for
 - [ADR-001 v1.3](docs/adr/accepted/adr-001-v1.4.md) - Binding architecture specification (Fuzzy-to-Fact protocol)
 - [Component Inventory](architecture/docs/01_component_inventory.md) - Detailed component reference
 - [API Reference](architecture/docs/04_api_reference.md) - Usage guide with examples
-- [Competency Questions Catalog](docs/competency-questions-catalog.md) - Research questions for knowledge graph building with the lifesciences-graph-builder skill
+- [Competency Questions Catalog](docs/competency-questions/competency-questions-catalog.md) - Research questions for knowledge graph building with the lifesciences-graph-builder skill
 
 ---
 
