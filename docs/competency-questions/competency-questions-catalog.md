@@ -23,6 +23,7 @@
 | cq11 | Pathway Validation | p53-MDM2-Nutlin axis | `cq11-p53-mdm2-nutlin` | Original |
 | cq12 | Health Emergencies | 2026 clinical trial priorities | `cq12-health-emergencies-2026` | Original |
 | cq13 | Commercialization | High-investment Phase 3 trials | `cq13-high-commercialization-trials` | Original |
+| cq14 | Synthetic Lethality | TP53 SL partners from Feng et al. | `cq14-feng-synthetic-lethality` | Feng et al. 2022 |
 | cq15 | CAR-T Regulatory | FDA/EMA milestone velocity | `cq15-car-t-regulatory` | Original |
 
 **Validation Files**: `docs/competency-questions/validiation/2026{month}{day}/cq{N}-*.md`
@@ -411,6 +412,45 @@
 **Validation**: `docs/competency-validations/cq13-high-commercialization-trials.md`
 
 **Target group_id**: `cq13-high-commercialization-trials`
+
+---
+
+## cq14: Feng et al. Synthetic Lethality Validation
+
+**Question**: *How can we validate synthetic lethal gene pairs from Feng et al. (2022) and identify druggable opportunities for TP53-mutant cancers?*
+
+**Source Paper**: Feng et al., *Sci. Adv.* 8, eabm6638 (2022) - [PMC35559673](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC9098673/)
+
+**Datasets**:
+- [dwb2023/sl_gene_pairs](https://huggingface.co/datasets/dwb2023/sl_gene_pairs) - 209 SL pairs
+- [dwb2023/pmc_35559673_table_s6_sl_gene_detail](https://huggingface.co/datasets/dwb2023/pmc_35559673_table_s6_sl_gene_detail) - 81 genes
+
+**Key Entities**:
+| Entity | CURIE | Role |
+|--------|-------|------|
+| TP53 | HGNC:11998 | Tumor suppressor (50% of cancers) |
+| TYMS | HGNC:12441 | Synthetic lethal partner |
+| 5-fluorouracil | CHEMBL:185 | TYMS inhibitor (approved) |
+| Pemetrexed | CHEMBL:225072 | TYMS inhibitor (approved) |
+
+**Gold Standard Path**:
+`Gene(TP53)` --[synthetic_lethal_with]--> `Gene(TYMS)` --[target_of]--> `Drug(Pemetrexed)` --[in_trial]--> `Trial(NCT04695925)`
+
+**Workflow**:
+1. **Anchor**: `hgnc_search_genes("TP53")` → HGNC:11998, `hgnc_search_genes("TYMS")` → HGNC:12441
+2. **Validate**: BioGRID ORCS: `curl "https://orcsws.thebiogrid.org/gene/7298"` → 1,446 screens
+3. **Druggability**: `chembl_search_compounds("fluorouracil")` → CHEMBL:185
+4. **Clinical**: `clinicaltrials_search_trials("TP53 pemetrexed")` → NCT:04695925
+5. **Persist**: `mcp__graphiti-docker__add_memory(group_id="cq14-feng-synthetic-lethality")`
+
+**Validation Results**:
+- 1,446 BioGRID ORCS screens confirm TYMS essentiality
+- Approved drugs exist (5-FU, pemetrexed, raltitrexed)
+- Active clinical trials exploring TP53/TYMS combinations
+
+**Source Documentation**: `docs/scenarios/scenario5-synthetic-lethality-feng-walkthrough.md`
+
+**Target group_id**: `cq14-feng-synthetic-lethality`
 
 ---
 
