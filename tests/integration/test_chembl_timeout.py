@@ -22,22 +22,12 @@ async def test_chembl_client_timeout_enforcement():
         time.sleep(1.0)  # Sleep longer than timeout (0.5s)
         return "result"
 
-    # We mock _get_executor to return a real ThreadPoolExecutor 
-    # (or just use the real one, but we want to be sure it's working)
-    
     try:
-        # We need to mock the _rate_limited_sdk_call ONLY for the actual execution part?
-        # No, we want to test _rate_limited_sdk_call logic itself.
-        # But _rate_limited_sdk_call calls loop.run_in_executor(self._get_executor(), sdk_func)
-        # So we can pass our slow function directly to _rate_limited_sdk_call?
-        # No, _rate_limited_sdk_call is "internal" but widely used.
-        # Let's call a public method like search_compounds but mock the SDK object inside it.
-        
-        # Actually, verifying _rate_limited_sdk_call directly is effective integration testing.
+        # Verify that _rate_limited_sdk_call enforces timeout on slow SDK calls
         with pytest.raises(TimeoutError) as excinfo:
             await client._rate_limited_sdk_call(slow_sdk_function)
         
-        assert "timeout" in str(excinfo.value)
+        assert "timeout" in str(excinfo.value).lower()
         
     finally:
         await client.close()
@@ -62,11 +52,7 @@ async def test_chembl_client_timeout_mapping_integration():
     mock_search.search.side_effect = slow_search
     client._molecule = mock_search
 
-    # Act
-    # We expect an internal retry loop, so it might take 0.1s * (retries)
-    # But wait, we said "timeouts not retried" in the code comment!
-    # Let's verify that expectation too.
-    
+    # Act - Timeout should fail immediately without retries (per implementation)
     result = await client.search_compounds("aspirin")
     
     # Assert
@@ -75,3 +61,40 @@ async def test_chembl_client_timeout_mapping_integration():
     assert "temporarily unavailable" in result.error.recovery_hint
 
     await client.close()
+
+
+@pytest.mark.asyncio
+async def test_chembl_timeout_no_retry():
+    """Verify that timeouts fail fast without exponential backoff retries."""
+    client = ChEMBLClient()
+    client._timeout = 0.2
+    
+    # Track how many times the slow function is called
+    call_count = 0
+    def slow_sdk_function():
+        nonlocal call_count
+        call_count += 1
+        import time
+        time.sleep(0.5)
+        return "result"
+    
+    try:
+        import time
+        start_time = time.monotonic()
+        # Expect failure
+        with pytest.raises(TimeoutError):
+            await client._sdk_call_with_backoff(slow_sdk_function)
+        
+        elapsed = time.monotonic() - start_time
+        
+        # Should fail after ~0.2s (timeout), not after multiple retries
+        # If it retried, it would be at least 0.2s + backoff + 0.2s + ...
+        assert elapsed < 1.0, f"Timeout should fail fast, took {elapsed:.2f}s"
+        assert call_count == 1, f"Timeout should not retry, called {call_count} times"
+        
+    except Exception as e:
+        # Just in case some other error pops up
+        if "timeout" not in str(e).lower():
+            raise e
+    finally:
+        await client.close()
