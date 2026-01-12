@@ -68,8 +68,13 @@ class ChEMBLClient(LifeSciencesClient):
         "DrugBank": "drugbank",
     }
 
+
     def __init__(self) -> None:
-        """Initialize the ChEMBL client with SDK and rate limiting."""
+        """Initialize the ChEMBL client with SDK and rate limiting.
+
+        The client inherits a default timeout of 30.0s from LifeSciencesClient,
+        which is enforced on all synchronous SDK calls via asyncio.wait_for.
+        """
         super().__init__(base_url=self.CHEMBL_BASE_URL)
 
         # Initialize ChEMBL SDK (synchronous)
@@ -127,7 +132,8 @@ class ChEMBLClient(LifeSciencesClient):
             )
         except asyncio.TimeoutError:
             # Raise generic exception with "timeout" keyword to trigger retry/mapping logic
-            raise Exception(f"ChEMBL SDK request timeout after {self._timeout}s")
+            raise TimeoutError(f"ChEMBL SDK request timeout after {self._timeout}s")
+
 
     async def _sdk_call_with_backoff(self, sdk_func: Any) -> Any:
         """Execute SDK call with exponential backoff for rate limit errors.
