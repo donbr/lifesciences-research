@@ -68,8 +68,13 @@ class ChEMBLClient(LifeSciencesClient):
         "DrugBank": "drugbank",
     }
 
+
     def __init__(self) -> None:
-        """Initialize the ChEMBL client with SDK and rate limiting."""
+        """Initialize the ChEMBL client with SDK and rate limiting.
+
+        The client inherits a default timeout of 30.0s from LifeSciencesClient,
+        which is enforced on all synchronous SDK calls via asyncio.wait_for.
+        """
         super().__init__(base_url=self.CHEMBL_BASE_URL)
 
         # Initialize ChEMBL SDK (synchronous)
@@ -120,7 +125,15 @@ class ChEMBLClient(LifeSciencesClient):
 
         # Execute SDK call in thread pool
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(self._get_executor(), sdk_func)
+        try:
+            return await asyncio.wait_for(
+                loop.run_in_executor(self._get_executor(), sdk_func),
+                timeout=self._timeout,
+            )
+        except asyncio.TimeoutError:
+            # Raise generic exception with "timeout" keyword to trigger retry/mapping logic
+            raise TimeoutError(f"ChEMBL SDK request timeout after {self._timeout}s")
+
 
     async def _sdk_call_with_backoff(self, sdk_func: Any) -> Any:
         """Execute SDK call with exponential backoff for rate limit errors.
@@ -145,7 +158,7 @@ class ChEMBLClient(LifeSciencesClient):
                 last_exception = e
                 error_str = str(e).lower()
 
-                # Check for rate limit or server errors
+                # Check for rate limit or server errors (timeouts not retried to avoid compounding delays)
                 is_rate_limited = "429" in error_str or "rate" in error_str
                 is_server_error = any(code in error_str for code in ["500", "502", "503"])
 
