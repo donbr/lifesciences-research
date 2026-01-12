@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CQ14: TP53-TYMS Synthetic Lethality Network</title>
+    <script src="https://unpkg.com/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #1a1a2e; color: #eee; }
+        #container { display: flex; height: 100vh; }
+        #cy { flex: 1; background: #16213e; }
+        #sidebar { width: 300px; padding: 20px; background: #0f3460; overflow-y: auto; }
+        h1 { font-size: 1.1rem; margin-bottom: 8px; color: #e94560; }
+        .subtitle { font-size: 0.75rem; color: #64748b; margin-bottom: 15px; }
+        h2 { font-size: 0.9rem; margin: 15px 0 10px; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; }
+        .legend-item { display: flex; align-items: center; margin: 8px 0; font-size: 0.85rem; }
+        .legend-color { width: 16px; height: 16px; border-radius: 50%; margin-right: 10px; border: 2px solid rgba(255,255,255,0.3); }
+        #info { background: #1a1a2e; border-radius: 8px; padding: 12px; margin-top: 15px; font-size: 0.8rem; line-height: 1.5; }
+        #info strong { color: #e94560; }
+        button { width: 100%; padding: 10px; margin-top: 15px; background: #e94560; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; transition: background 0.2s; }
+        button:hover { background: #c73e54; }
+        .controls { margin-top: 15px; }
+        select { width: 100%; padding: 8px; background: #1a1a2e; color: #eee; border: 1px solid #334155; border-radius: 4px; }
+        .stats { font-size: 0.75rem; color: #64748b; margin-top: 10px; }
+        .source { font-size: 0.7rem; color: #475569; margin-top: 20px; padding-top: 15px; border-top: 1px solid #334155; }
+        .source a { color: #60a5fa; }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <div id="cy"></div>
+        <div id="sidebar">
+            <h1>CQ14: TP53-TYMS Synthetic Lethality</h1>
+            <div class="subtitle">Feng et al. 2022 Validation</div>
+            <div class="stats" id="stats"></div>
+
+            <h2>Legend</h2>
+            <div id="legend"></div>
+
+            <h2>Selected Node</h2>
+            <div id="info">Click a node to see details</div>
+
+            <div class="controls">
+                <h2>Layout</h2>
+                <select id="layout-select">
+                    <option value="cose">Force-Directed (COSE)</option>
+                    <option value="circle">Circle</option>
+                    <option value="grid">Grid</option>
+                    <option value="breadthfirst">Hierarchical</option>
+                    <option value="concentric">Concentric</option>
+                </select>
+            </div>
+
+            <button onclick="exportPNG()">Export PNG</button>
+            <button onclick="cy.fit()" style="background: #334155;">Fit to View</button>
+
+            <div class="source">
+                <strong>Source:</strong> Feng X, et al. Genome-wide CRISPR screens using isogenic cells reveal vulnerabilities conferred by loss of tumor suppressors. <em>Sci Adv.</em> 2022;8(19):eabm6638.<br>
+                <a href="https://doi.org/10.1126/sciadv.abm6638" target="_blank">DOI: 10.1126/sciadv.abm6638</a>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    // CQ14 Graph Data - TP53/TYMS Synthetic Lethality Network
+    const graphData = {
+        "nodes": [
+            {
+                "id": "HGNC:11998",
+                "label": "TP53",
+                "type": "Gene",
+                "color": "#4CAF50",
+                "metadata": {
+                    "location": "17p13.1",
+                    "role": "Tumor suppressor",
+                    "status": "Loss-of-function mutant"
+                }
+            },
+            {
+                "id": "HGNC:12441",
+                "label": "TYMS",
+                "type": "Gene",
+                "color": "#4CAF50",
+                "metadata": {
+                    "location": "18p11.32",
+                    "role": "Thymidylate synthase",
+                    "essentiality": "24.3% of CRISPR screens"
+                }
+            },
+            {
+                "id": "CHEMBL:185",
+                "label": "5-Fluorouracil",
+                "type": "SmallMolecule",
+                "color": "#2196F3",
+                "metadata": {
+                    "phase": "Approved",
+                    "MW": "130.08 Da",
+                    "indications": "70+ cancer types"
+                }
+            },
+            {
+                "id": "CHEMBL:225072",
+                "label": "Pemetrexed",
+                "type": "SmallMolecule",
+                "color": "#2196F3",
+                "metadata": {
+                    "phase": "Approved",
+                    "MW": "427.42 Da",
+                    "brand": "Alimta"
+                }
+            },
+            {
+                "id": "NCT:04695925",
+                "label": "TOP Trial",
+                "type": "ClinicalTrial",
+                "color": "#FF9800",
+                "metadata": {
+                    "phase": "Phase 3",
+                    "status": "Active, not recruiting",
+                    "endpoint": "Progression-free survival"
+                }
+            }
+        ],
+        "edges": [
+            {
+                "source": "HGNC:11998",
+                "target": "HGNC:12441",
+                "label": "synthetic_lethal_with"
+            },
+            {
+                "source": "CHEMBL:185",
+                "target": "HGNC:12441",
+                "label": "inhibits"
+            },
+            {
+                "source": "CHEMBL:225072",
+                "target": "HGNC:12441",
+                "label": "inhibits"
+            },
+            {
+                "source": "CHEMBL:225072",
+                "target": "NCT:04695925",
+                "label": "tested_in"
+            },
+            {
+                "source": "HGNC:11998",
+                "target": "NCT:04695925",
+                "label": "eligibility_biomarker"
+            }
+        ]
+    };
+
+    // Node type colors
+    const typeColors = {
+        'Gene': '#4CAF50',
+        'Protein': '#009688',
+        'Drug': '#2196F3',
+        'SmallMolecule': '#2196F3',
+        'Disease': '#F44336',
+        'Pathway': '#9C27B0',
+        'ClinicalTrial': '#FF9800',
+        'Publication': '#607D8B',
+        'default': '#78909C'
+    };
+
+    // Edge predicate colors
+    const predicateColors = {
+        'synthetic_lethal_with': '#e94560',
+        'inhibits': '#2196F3',
+        'activates': '#4CAF50',
+        'associated_with': '#FF9800',
+        'participates_in': '#9C27B0',
+        'tested_in': '#00BCD4',
+        'eligibility_biomarker': '#FFEB3B',
+        'default': '#64748b'
+    };
+
+    function getNodeColor(type) {
+        return typeColors[type] || typeColors['default'];
+    }
+
+    function getEdgeColor(predicate) {
+        return predicateColors[predicate] || predicateColors['default'];
+    }
+
+    // Transform data for Cytoscape
+    const elements = {
+        nodes: graphData.nodes.map(n => ({
+            data: {
+                id: n.id,
+                label: n.label,
+                type: n.type,
+                color: n.color || getNodeColor(n.type),
+                metadata: n.metadata || {}
+            }
+        })),
+        edges: graphData.edges.map((e, i) => ({
+            data: {
+                id: `e${i}`,
+                source: e.source,
+                target: e.target,
+                label: e.label,
+                color: e.color || getEdgeColor(e.label)
+            }
+        }))
+    };
+
+    // Initialize Cytoscape
+    const cy = cytoscape({
+        container: document.getElementById('cy'),
+        elements: elements,
+        style: [
+            {
+                selector: 'node',
+                style: {
+                    'background-color': 'data(color)',
+                    'label': 'data(label)',
+                    'color': '#fff',
+                    'text-valign': 'bottom',
+                    'text-margin-y': 8,
+                    'font-size': '14px',
+                    'font-weight': '600',
+                    'text-outline-color': '#16213e',
+                    'text-outline-width': 2,
+                    'width': 50,
+                    'height': 50,
+                    'border-width': 3,
+                    'border-color': '#fff',
+                    'border-opacity': 0.3
+                }
+            },
+            {
+                selector: 'node:selected',
+                style: {
+                    'border-width': 4,
+                    'border-color': '#e94560',
+                    'border-opacity': 1
+                }
+            },
+            {
+                selector: 'edge',
+                style: {
+                    'width': 3,
+                    'line-color': 'data(color)',
+                    'target-arrow-color': 'data(color)',
+                    'target-arrow-shape': 'triangle',
+                    'curve-style': 'bezier',
+                    'label': 'data(label)',
+                    'font-size': '11px',
+                    'color': '#94a3b8',
+                    'text-rotation': 'autorotate',
+                    'text-margin-y': -12,
+                    'text-outline-color': '#16213e',
+                    'text-outline-width': 1
+                }
+            },
+            {
+                selector: 'edge:selected',
+                style: {
+                    'width': 5,
+                    'line-color': '#e94560',
+                    'target-arrow-color': '#e94560'
+                }
+            }
+        ],
+        layout: {
+            name: 'cose',
+            animate: true,
+            animationDuration: 800,
+            nodeRepulsion: 8000,
+            idealEdgeLength: 120
+        }
+    });
+
+    // Build legend from actual node types
+    const usedTypes = [...new Set(graphData.nodes.map(n => n.type))];
+    const legendDiv = document.getElementById('legend');
+    usedTypes.forEach(type => {
+        const item = document.createElement('div');
+        item.className = 'legend-item';
+        item.innerHTML = `<div class="legend-color" style="background: ${getNodeColor(type)}"></div>${type}`;
+        legendDiv.appendChild(item);
+    });
+
+    // Stats
+    document.getElementById('stats').textContent =
+        `${graphData.nodes.length} nodes, ${graphData.edges.length} edges`;
+
+    // Node click handler
+    cy.on('tap', 'node', function(evt) {
+        const node = evt.target.data();
+        let html = `<strong>${node.label}</strong><br>`;
+        html += `ID: ${node.id}<br>`;
+        html += `Type: ${node.type}`;
+        if (node.metadata && Object.keys(node.metadata).length > 0) {
+            html += '<br><br>';
+            for (const [key, value] of Object.entries(node.metadata)) {
+                html += `<em>${key}:</em> ${value}<br>`;
+            }
+        }
+        document.getElementById('info').innerHTML = html;
+    });
+
+    // Layout change handler
+    document.getElementById('layout-select').addEventListener('change', function(e) {
+        cy.layout({ name: e.target.value, animate: true, animationDuration: 500 }).run();
+    });
+
+    // Export PNG
+    function exportPNG() {
+        const png = cy.png({ output: 'blob', bg: '#16213e', scale: 2 });
+        const url = URL.createObjectURL(png);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'cq14-tp53-tyms-network.png';
+        a.click();
+        URL.revokeObjectURL(url);
+    }
+    </script>
+</body>
+</html>
