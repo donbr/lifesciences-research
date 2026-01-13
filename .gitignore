@@ -58,3 +58,6 @@ htmlcov/
 ra_*/
 # Git worktrees (ADR-005 - local development only)
 .worktrees/
+
+# docs/video/
+docs/video/
