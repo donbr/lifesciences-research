@@ -14,7 +14,9 @@ Drug discovery, drug repurposing and biomedical research depend on accurate, up�
 * **Correctness:**  All servers implement a **Fuzzy‑to‑Fact** protocol (search → candidate → strict lookup), ensuring canonical IDs are resolved before downstream reasoning.
 * **Self‑Healing:**  When an identifier has been deprecated or an API field changes, the server returns a structured error with a recovery hint so the agent can retry with the new canonical ID or schema.
 
-This design stance means the MCP layer can sit behind any knowledge graph or retrieval‑augmented generation system.  It doesn’t build the graph for you; it ensures the facts you plug into your graph are still correct.
+This design stance means the MCP layer can sit behind any knowledge graph or retrieval‑augmented generation system.  It doesn't build the graph for you; it ensures the facts you plug into your graph are still correct.
+
+---
 
 ## Vision
 
@@ -22,30 +24,17 @@ Enable AI agents to seamlessly query the world's most important life‑sciences 
 
 ---
 
-## The Modern Drug Discovery Stack (2025)
+## Life Sciences Research Stack
 
-The current best practice in computational drug discovery is an **integrative approach** using programmatic APIs across multiple data layers:
+This platform provides **12 MCP servers** organized into 5 tiers by research function:
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    DRUG REPURPOSING STACK                   │
-├─────────────────────────────────────────────────────────────┤
-│  Layer 1: Chemical/Drug                                     │
-│  ChEMBL → PubChem → DrugBank                                │
-├─────────────────────────────────────────────────────────────┤
-│  Layer 2: Target/Protein                                    │
-│  UniProt → STRING → IUPHAR/GtoPdb                           │
-├─────────────────────────────────────────────────────────────┤
-│  Layer 3: Gene/Genomics                                     │
-│  HGNC → Ensembl → NCBI/Entrez                               │
-├─────────────────────────────────────────────────────────────┤
-│  Layer 4: Disease/Phenotype                                 │
-│  OMIM → Orphanet → Open Targets                             │
-├─────────────────────────────────────────────────────────────┤
-│  Layer 5: Knowledge Integration                             │
-│  Open Targets Platform (aggregates all above)               │
-└─────────────────────────────────────────────────────────────┘
-```
+| Tier | Focus | APIs |
+|------|-------|------|
+| **Tier 0** | Drug Discovery Core | ChEMBL · Open Targets |
+| **Tier 1** | Gene/Protein Foundation | HGNC · UniProt · STRING · BioGRID |
+| **Tier 2** | Pharmacology & Interactions | IUPHAR/GtoPdb · PubChem |
+| **Tier 3** | Pathways & Clinical Trials | WikiPathways · ClinicalTrials.gov |
+| **Tier 4** | Genomics & Identifiers | Ensembl · NCBI/Entrez |
 
 ---
 
@@ -73,7 +62,7 @@ The current best practice in computational drug discovery is an **integrative ap
 | Server | API | Status | Description |
 |--------|-----|--------|-------------|
 | `iuphar-mcp` | [GtoPdb](https://www.guidetopharmacology.org/) | **✅ Complete** | Pharmacological targets, ligand-receptor interactions - 59 tests passing ([spec](specs/011-iuphar-mcp-server/)) |
-| `stitch-mcp` | [STITCH](http://stitch.embl.de/) | Out of Scope | Chemical-protein interactions |
+| `stitch-mcp` | [STITCH](http://stitch.embl.de/) | Out of Scope (unsupported) | Chemical-protein interactions |
 | `pubchem-mcp` | [PubChem](https://pubchem.ncbi.nlm.nih.gov/) | **✅ Complete** | Chemical structures, cross-references - 85 tests passing ([spec](specs/010-pubchem-mcp-server/)) |
 
 ### Tier 3: Pathways & Clinical Trials
@@ -151,7 +140,6 @@ For local development or targeted tasks, run individual servers as shown in the 
 # Tier 0: Drug Discovery Core
 uv run fastmcp run src/lifesciences_mcp/servers/chembl.py        # ChEMBL compounds & bioactivity (✅ 112 tests)
 uv run fastmcp run src/lifesciences_mcp/servers/opentargets.py   # Target-disease associations (✅ 9 tests)
-uv run fastmcp run src/lifesciences_mcp/servers/drugbank.py      # Drug interactions (⛔ requires API key)
 
 # Tier 1: Gene/Protein Foundation
 uv run fastmcp run src/lifesciences_mcp/servers/hgnc.py          # Gene nomenclature (✅ 21 tests)

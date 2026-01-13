@@ -121,7 +121,7 @@ Description: Explores chemical interactions with EGFR, a common target for tyros
 
 [STRING url](https://string-db.org/cgi/network?identifiers=EGFR&species=9606&required_score=900&network_flavor=evidence&add_white_nodes=10)
 
-<!-- ![EGFR STITCH Diagram](../images/mutation/egfr-stitch.png) -->
+
 
 b. ERBB2 (HER2)
 
@@ -131,7 +131,7 @@ Description: Investigates potential inhibitors for ERBB2, often overexpressed or
 
 [STRING url](https://string-db.org/cgi/network?identifiers=ERBB2&species=9606&required_score=900&network_flavor=evidence&add_white_nodes=10)
 
-<!-- ![ERBB2 STITCH Diagram](../images/mutation/erbb2-stitch.png) -->
+
 
 c. KRAS
 
@@ -141,7 +141,7 @@ Description: Examines chemical interactions with KRAS, a frequently mutated gene
 
 [STRING url](https://string-db.org/cgi/network?identifiers=KRAS&species=9606&required_score=900&network_flavor=evidence&add_white_nodes=10)
 
-<!-- ![KRAS STITCH Diagram](../images/mutation/kras-stitch.png) -->
+
 
 d. EML4-ALK Fusion
 
@@ -151,7 +151,7 @@ Description: Explores potential inhibitors for the EML4-ALK fusion protein, a ke
 
 [STRING url](https://string-db.org/cgi/network?identifiers=EML4%0aALK&species=9606&required_score=900&network_flavor=evidence&add_white_nodes=10)
 
-<!-- ![EML4-ALK STITCH Diagram](../images/mutation/eml4-alk-stitch.png) -->
+
 
 #### 2. Inactivating Mutations
 
@@ -163,7 +163,7 @@ Description: Investigates chemical interactions with TP53, aiming to identify co
 
 [STRING url](https://string-db.org/cgi/network?identifiers=TP53&species=9606&required_score=900&network_flavor=evidence&add_white_nodes=10)
 
-<!-- ![TP53 STITCH Diagram](../images/mutation/tp53-stitch.png) -->
+
 
 b. CDKN2A
 
@@ -173,7 +173,7 @@ Description: Explores potential ways to compensate for loss of CDKN2A function i
 
 [STRING url](https://string-db.org/cgi/network?identifiers=CDKN2A&species=9606&required_score=900&network_flavor=evidence&add_white_nodes=10)
 
-<!-- ![CDKN2A STITCH Diagram](../images/mutation/cdkn2a-stitch.png) -->
+
 
 c. RASSF1
 
@@ -183,7 +183,7 @@ Description: Examines chemical interactions with RASSF1, a tumor suppressor ofte
 
 [STRING url](https://string-db.org/cgi/network?identifiers=RASSF1&species=9606&required_score=900&network_flavor=evidence&add_white_nodes=10)
 
-<!-- ![RASSF1 STITCH Diagram](../images/mutation/rassf1-stitch.png) -->
+
 
 d. FHIT
 
@@ -193,7 +193,7 @@ Description: Investigates compounds interacting with FHIT, a tumor suppressor fr
 
 [STRING url](https://string-db.org/cgi/network?identifiers=FHIT&species=9606&required_score=900&network_flavor=evidence&add_white_nodes=10)
 
-<!-- ![FHIT STITCH Diagram](../images/mutation/fhit-stitch.png) -->
+
 
 e. RARB
 
@@ -203,7 +203,7 @@ Description: Explores chemical interactions with RARB, aiming to identify compou
 
 [STRING url](https://string-db.org/cgi/network?identifiers=RARB&species=9606&required_score=900&network_flavor=evidence&add_white_nodes=10)
 
-<!-- ![RARB STITCH Diagram](../images/mutation/rarb-stitch.png) -->
+
 
 ### Upstream & Downstream Regulation
 
@@ -217,7 +217,7 @@ Description: Examines chemical interactions with MEK1/2, key components of the M
 
 [STRING url](https://string-db.org/cgi/network?identifiers=MAP2K1%0aMAP2K2&species=9606&required_score=900&network_flavor=evidence&add_white_nodes=10)
 
-<!-- ![MEK STITCH Diagram](../images/mutation/mek-inhibitors-stitch.png) -->
+
 
 2. BRAF inhibitors:
 
@@ -227,7 +227,7 @@ Description: Investigates potential inhibitors for BRAF and MAP3K11, important i
 
 [STRING url](https://string-db.org/cgi/network?identifiers=BRAF%0aMAP3K11&species=9606&required_score=900&network_flavor=evidence&add_white_nodes=10)
 
-<!-- ![BRAF STITCH Diagram](../images/mutation/braf-inhibitors-stitch.png) -->
+
 
 3. PI3K inhibitors:
 
@@ -237,7 +237,7 @@ Description: Explores chemical interactions with various PI3K subunits, crucial 
 
 [STRING url](https://string-db.org/cgi/network?identifiers=PIK3CA%0aPIK3CB%0aPIK3CD%0aPIK3R1%0aPIK3R2%0aPIK3R3&species=9606&required_score=900&network_flavor=evidence&add_white_nodes=10)
 
-<!-- ![PI3K STITCH Diagram](../images/mutation/pi3k-inhibitors-stitch.png) -->
+
 
 4. CDK4/6 inhibitors:
 
@@ -247,7 +247,7 @@ Description: Examines potential inhibitors for CDK4/6, key regulators of the cel
 
 [STRING url](https://string-db.org/cgi/network?identifiers=CDK4%0aCDK6&species=9606&required_score=900&network_flavor=evidence&add_white_nodes=10)
 
-<!-- ![CDK 4/6 STITCH Diagram](../images/mutation/cdk46-inhibitors-stitch.png) -->
+
 
 5. p53 pathway downstream effectors:
 
@@ -257,7 +257,7 @@ Description: Investigates chemical interactions with p53 downstream targets, exp
 
 [STRING url](https://string-db.org/cgi/network?identifiers=CDKN1A%0aBAX%0aBAK1%0aGADD45A%0aGADD45B%0aGADD45G%0aDDB2%0aPOLK&species=9606&required_score=900&network_flavor=evidence&add_white_nodes=10)
 
-<!-- ![P53 STITCH Diagram](../images/mutation/p53-effectors-stitch.png) -->
+
 
 ### Notes
 
