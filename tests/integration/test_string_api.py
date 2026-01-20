@@ -16,12 +16,16 @@ from lifesciences_mcp.models.interaction import (
 
 
 @pytest.mark.integration
+@pytest.mark.string
 class TestSTRINGClientIntegration:
     """Integration tests for STRINGClient with real STRING API."""
 
     @pytest.fixture
-    async def client(self):
-        """Create a STRING client."""
+    async def client(self, check_string_available):
+        """Create a STRING client.
+
+        Automatically skips if STRING API is unavailable.
+        """
         client = STRINGClient(species=9606)  # Human
         yield client
         await client.close()
@@ -163,6 +167,7 @@ class TestSTRINGClientIntegration:
 
 
 @pytest.mark.integration
+@pytest.mark.string
 async def test_search_short_query():
     """Test that short queries return AMBIGUOUS_QUERY error."""
     client = STRINGClient()
@@ -175,6 +180,7 @@ async def test_search_short_query():
 
 
 @pytest.mark.integration
+@pytest.mark.string
 async def test_network_image_url_generation():
     """Test network image URL generation utility."""
     client = STRINGClient()
@@ -189,6 +195,7 @@ async def test_network_image_url_generation():
 
 
 @pytest.mark.integration
+@pytest.mark.string
 async def test_max_interactions_limit_nfr003():
     """Test NFR-003: Max interactions per request is capped at 10,000.
 

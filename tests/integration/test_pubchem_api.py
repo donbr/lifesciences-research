@@ -11,7 +11,7 @@ from lifesciences_mcp.clients.pubchem import PubChemClient
 from lifesciences_mcp.models.envelopes import ErrorCode, ErrorEnvelope
 
 # Mark all tests in this module as integration tests
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.pubchem]
 
 
 class TestSearchCompoundsIntegration:

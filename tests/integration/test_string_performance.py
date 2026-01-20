@@ -17,6 +17,7 @@ from lifesciences_mcp.models.interaction import InteractionNetwork
 
 
 @pytest.mark.integration
+@pytest.mark.string
 @pytest.mark.timeout(120)
 async def test_network_query_performance_nfr002():
     """Test NFR-002: P95 response time < 3 seconds for network queries.

@@ -11,6 +11,8 @@ import pytest
 
 from lifesciences_mcp.clients.iuphar import IUPHARClient
 
+pytestmark = [pytest.mark.unit, pytest.mark.iuphar]
+
 # =============================================================================
 # User Story 1: Fuzzy Ligand Search - Client Unit Tests
 # =============================================================================

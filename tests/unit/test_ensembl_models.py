@@ -18,6 +18,8 @@ from lifesciences_mcp.models.ensembl import (
     GeneSearchCandidate,
 )
 
+pytestmark = [pytest.mark.unit, pytest.mark.ensembl]
+
 # ==============================================================================
 # GeneSearchCandidate Tests (T057)
 # ==============================================================================

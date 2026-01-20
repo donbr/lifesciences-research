@@ -10,6 +10,8 @@ import pytest
 
 from lifesciences_mcp.models.trial_location import TrialLocation
 
+pytestmark = [pytest.mark.unit, pytest.mark.clinicaltrials]
+
 # ==============================================================================
 # T046, T047: TrialLocation Tests (US3)
 # ==============================================================================

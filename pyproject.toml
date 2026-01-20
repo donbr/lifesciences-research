@@ -35,8 +35,23 @@ asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 norecursedirs = ["tests/manual", "tests/gaps"]
 markers = [
+    "unit: marks tests as unit tests (no network required)",
     "integration: marks tests as integration tests (require network)",
     "e2e: marks tests as end-to-end tests (require live server)",
+    # API-specific markers for targeted test runs
+    "hgnc: tests for HGNC gene nomenclature API",
+    "uniprot: tests for UniProt protein database API",
+    "chembl: tests for ChEMBL compound database (Python SDK)",
+    "opentargets: tests for Open Targets API",
+    "string: tests for STRING protein interaction API",
+    "biogrid: tests for BioGRID interaction API",
+    "ensembl: tests for Ensembl genomics API",
+    "entrez: tests for NCBI Entrez API",
+    "pubchem: tests for PubChem compound API",
+    "iuphar: tests for IUPHAR/GtoPdb pharmacology API",
+    "wikipathways: tests for WikiPathways API",
+    "clinicaltrials: tests for ClinicalTrials.gov API",
+    "drugbank: tests for DrugBank API",
 ]
 # Global timeout: prevent any test from hanging indefinitely
 # Individual tests can override with @pytest.mark.timeout(N)

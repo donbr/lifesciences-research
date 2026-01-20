@@ -15,6 +15,8 @@ import pytest
 from lifesciences_mcp.clients.pubchem import PubChemClient
 from lifesciences_mcp.models.envelopes import ErrorCode, ErrorEnvelope
 
+pytestmark = [pytest.mark.unit, pytest.mark.pubchem]
+
 # =============================================================================
 # T027: Rate Limit Per Second Tests
 # =============================================================================

@@ -15,6 +15,8 @@ from lifesciences_mcp.models.compound import (
     CompoundSearchCandidate,
 )
 
+pytestmark = [pytest.mark.unit, pytest.mark.chembl]
+
 
 class TestCompoundSearchCandidate:
     """Tests for CompoundSearchCandidate model (T012: US1)."""

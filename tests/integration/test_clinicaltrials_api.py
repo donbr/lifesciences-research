@@ -13,10 +13,13 @@ Run with:
 import pytest
 
 # Skip entire module due to Cloudflare blocking Python clients
-pytestmark = pytest.mark.skip(
-    reason="ClinicalTrials.gov Cloudflare blocks Python httpx clients (403 Forbidden). "
-    "API verified working via curl. See CLAUDE.md for manual test commands."
-)
+pytestmark = [
+    pytest.mark.clinicaltrials,
+    pytest.mark.skip(
+        reason="ClinicalTrials.gov Cloudflare blocks Python httpx clients (403 Forbidden). "
+        "API verified working via curl. See CLAUDE.md for manual test commands."
+    ),
+]
 
 from lifesciences_mcp.clients.clinicaltrials import ClinicalTrialsClient
 from lifesciences_mcp.models.envelopes import ErrorCode, ErrorEnvelope, PaginationEnvelope

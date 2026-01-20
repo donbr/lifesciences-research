@@ -17,12 +17,16 @@ from lifesciences_mcp.models.envelopes import ErrorEnvelope, PaginationEnvelope
 
 
 @pytest.mark.integration
+@pytest.mark.chembl
 class TestSearchCompoundsIntegration:
     """Integration tests for search_compounds (T013: US1)."""
 
     @pytest.fixture
-    async def client(self):
-        """Create a ChEMBL client."""
+    async def client(self, check_chembl_available):
+        """Create a ChEMBL client.
+
+        Automatically skips if ChEMBL API is unavailable.
+        """
         client = ChEMBLClient()
         yield client
         await client.close()
@@ -94,12 +98,16 @@ class TestSearchCompoundsIntegration:
 
 
 @pytest.mark.integration
+@pytest.mark.chembl
 class TestGetCompoundIntegration:
     """Integration tests for get_compound (T018: US2)."""
 
     @pytest.fixture
-    async def client(self):
-        """Create a ChEMBL client."""
+    async def client(self, check_chembl_available):
+        """Create a ChEMBL client.
+
+        Automatically skips if ChEMBL API is unavailable.
+        """
         client = ChEMBLClient()
         yield client
         await client.close()
@@ -150,12 +158,16 @@ class TestGetCompoundIntegration:
 
 
 @pytest.mark.integration
+@pytest.mark.chembl
 class TestGetCompoundsBatchIntegration:
     """Integration tests for get_compounds_batch (T019: US2)."""
 
     @pytest.fixture
-    async def client(self):
-        """Create a ChEMBL client."""
+    async def client(self, check_chembl_available):
+        """Create a ChEMBL client.
+
+        Automatically skips if ChEMBL API is unavailable.
+        """
         client = ChEMBLClient()
         yield client
         await client.close()
@@ -206,12 +218,16 @@ class TestGetCompoundsBatchIntegration:
 
 
 @pytest.mark.integration
+@pytest.mark.chembl
 class TestCrossReferencesIntegration:
     """Integration tests for cross-references (T027: US3)."""
 
     @pytest.fixture
-    async def client(self):
-        """Create a ChEMBL client."""
+    async def client(self, check_chembl_available):
+        """Create a ChEMBL client.
+
+        Automatically skips if ChEMBL API is unavailable.
+        """
         client = ChEMBLClient()
         yield client
         await client.close()
@@ -265,12 +281,16 @@ class TestCrossReferencesIntegration:
 
 
 @pytest.mark.integration
+@pytest.mark.chembl
 class TestErrorRecoveryIntegration:
     """Integration tests for error recovery (T032: US4)."""
 
     @pytest.fixture
-    async def client(self):
-        """Create a ChEMBL client."""
+    async def client(self, check_chembl_available):
+        """Create a ChEMBL client.
+
+        Automatically skips if ChEMBL API is unavailable.
+        """
         client = ChEMBLClient()
         yield client
         await client.close()
@@ -304,12 +324,16 @@ class TestErrorRecoveryIntegration:
 
 
 @pytest.mark.integration
+@pytest.mark.chembl
 class TestFuzzyToFactWorkflow:
     """Test complete fuzzy-to-fact workflow."""
 
     @pytest.fixture
-    async def client(self):
-        """Create a ChEMBL client."""
+    async def client(self, check_chembl_available):
+        """Create a ChEMBL client.
+
+        Automatically skips if ChEMBL API is unavailable.
+        """
         client = ChEMBLClient()
         yield client
         await client.close()

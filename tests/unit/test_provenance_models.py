@@ -7,6 +7,8 @@ from pydantic import ValidationError
 
 from lifesciences_mcp.models.provenance import BatchProvenance, MCPClaim, Provenance
 
+pytestmark = pytest.mark.unit
+
 
 class TestProvenance:
     """Tests for Provenance model."""

@@ -14,6 +14,8 @@ from lifesciences_mcp.models.entrez import (
     NCBI_GENE_CURIE_PATTERN,
 )
 
+pytestmark = [pytest.mark.unit, pytest.mark.entrez]
+
 
 # =============================================================================
 # T058: GeneSearchCandidate Model Tests

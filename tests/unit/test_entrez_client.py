@@ -15,6 +15,8 @@ from lifesciences_mcp.clients.entrez import EntrezClient
 from lifesciences_mcp.models.envelopes import ErrorCode, ErrorEnvelope, PaginationEnvelope
 from lifesciences_mcp.models.entrez import EntrezGene, GeneSearchCandidate
 
+pytestmark = [pytest.mark.unit, pytest.mark.entrez]
+
 
 # =============================================================================
 # T061: EntrezClient Unit Tests

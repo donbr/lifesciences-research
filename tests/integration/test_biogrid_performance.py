@@ -16,13 +16,17 @@ from lifesciences_mcp.clients import BioGridClient
 from lifesciences_mcp.models.biogrid import InteractionResult
 
 # Skip if no API key
-pytestmark = pytest.mark.skipif(
-    not os.getenv("BIOGRID_API_KEY"),
-    reason="BIOGRID_API_KEY not set. Get free key at https://webservice.thebiogrid.org/",
-)
+pytestmark = [
+    pytest.mark.biogrid,
+    pytest.mark.skipif(
+        not os.getenv("BIOGRID_API_KEY"),
+        reason="BIOGRID_API_KEY not set. Get free key at https://webservice.thebiogrid.org/",
+    ),
+]
 
 
 @pytest.mark.integration
+@pytest.mark.biogrid
 async def test_performance_interaction_query_nfr004():
     """Test NFR-004: P95 latency < 3 seconds for interaction queries.
 
