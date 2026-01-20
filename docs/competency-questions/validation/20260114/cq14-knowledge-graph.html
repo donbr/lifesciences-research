@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CQ14: TP53-TYMS Synthetic Lethality Knowledge Graph</title>
+    <script src="https://unpkg.com/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #1a1a2e; color: #eee; }
+        #container { display: flex; height: 100vh; }
+        #cy { flex: 1; background: #16213e; }
+        #sidebar { width: 320px; padding: 20px; background: #0f3460; overflow-y: auto; }
+        h1 { font-size: 1.2rem; margin-bottom: 15px; color: #e94560; }
+        h2 { font-size: 0.9rem; margin: 15px 0 10px; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; }
+        .legend-item { display: flex; align-items: center; margin: 8px 0; font-size: 0.85rem; }
+        .legend-color { width: 16px; height: 16px; border-radius: 50%; margin-right: 10px; border: 2px solid rgba(255,255,255,0.3); }
+        #info { background: #1a1a2e; border-radius: 8px; padding: 12px; margin-top: 15px; font-size: 0.8rem; line-height: 1.5; }
+        #info strong { color: #e94560; }
+        button { width: 100%; padding: 10px; margin-top: 15px; background: #e94560; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; transition: background 0.2s; }
+        button:hover { background: #c73e54; }
+        .controls { margin-top: 15px; }
+        select { width: 100%; padding: 8px; background: #1a1a2e; color: #eee; border: 1px solid #334155; border-radius: 4px; }
+        .stats { font-size: 0.75rem; color: #64748b; margin-top: 10px; }
+        .findings { background: #1a1a2e; border-radius: 8px; padding: 12px; margin-top: 15px; font-size: 0.75rem; line-height: 1.6; }
+        .findings h3 { color: #4CAF50; margin-bottom: 8px; font-size: 0.85rem; }
+        .findings li { margin-left: 15px; margin-bottom: 5px; }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <div id="cy"></div>
+        <div id="sidebar">
+            <h1>CQ14: TP53-TYMS Synthetic Lethality</h1>
+            <div class="stats" id="stats"></div>
+            <div class="stats">Validated: 2026-01-14</div>
+
+            <h2>Legend</h2>
+            <div id="legend"></div>
+
+            <h2>Selected Node</h2>
+            <div id="info">Click a node to see details</div>
+
+            <div class="findings">
+                <h3>Key Findings</h3>
+                <ul>
+                    <li><strong>Typo Corrected:</strong> NCT:06975892 → NCT:06976892</li>
+                    <li><strong>Bonus Discovery:</strong> Direct TP53-TYMS synthetic lethality (PubMed: 35559673)</li>
+                    <li><strong>Mechanism:</strong> Triple threat - nucleotide depletion + DNA repair block + checkpoint failure</li>
+                </ul>
+            </div>
+
+            <div class="controls">
+                <h2>Layout</h2>
+                <select id="layout-select">
+                    <option value="cose">Force-Directed (COSE)</option>
+                    <option value="circle">Circle</option>
+                    <option value="grid">Grid</option>
+                    <option value="breadthfirst">Hierarchical</option>
+                    <option value="concentric">Concentric</option>
+                </select>
+            </div>
+
+            <button onclick="exportPNG()">Export PNG</button>
+            <button onclick="cy.fit()" style="background: #334155;">Fit to View</button>
+        </div>
+    </div>
+
+    <script>
+    // === CQ14 GRAPH DATA ===
+    const graphData = {
+        nodes: [
+            // Core genes from validation
+            { id: "HGNC:11998", label: "TP53", type: "Gene", metadata: { name: "tumor protein p53", location: "17p13.1", role: "Tumor suppressor, mutated in ~50% of cancers", entrez: "7157", uniprot: "P04637" } },
+            { id: "HGNC:12441", label: "TYMS", type: "Gene", metadata: { name: "thymidylate synthetase", location: "18p11.32", role: "Rate-limiting enzyme in dTMP synthesis", entrez: "7298", uniprot: "P04818" } },
+            { id: "HGNC:1784", label: "CDKN1A (p21)", type: "Gene", metadata: { name: "cyclin dependent kinase inhibitor 1A", role: "G1/S checkpoint mediator, TP53 target gene", aliases: "p21, CIP1, WAF1" } },
+            { id: "HGNC:4095", label: "GADD45A", type: "Gene", metadata: { name: "growth arrest and DNA damage inducible alpha", role: "DNA repair coordinator, TP53 target gene" } },
+            { id: "HGNC:1925", label: "CHEK1", type: "Gene", metadata: { name: "checkpoint kinase 1", role: "Intra-S and G2/M checkpoint kinase" } },
+            // CDK targets (referenced in edges)
+            { id: "CDK2", label: "CDK2", type: "Gene", metadata: { role: "Cyclin-dependent kinase 2, G1/S transition" } },
+            { id: "CDK4", label: "CDK4", type: "Gene", metadata: { role: "Cyclin-dependent kinase 4, G1 phase progression" } },
+            { id: "CDK6", label: "CDK6", type: "Gene", metadata: { role: "Cyclin-dependent kinase 6, G1 phase progression" } },
+            // Folate cycle genes
+            { id: "DHFR", label: "DHFR", type: "Gene", metadata: { role: "Dihydrofolate reductase, folate cycle partner" } },
+            { id: "DUT", label: "DUT", type: "Gene", metadata: { role: "dUTPase, provides dUMP substrate for TYMS" } },
+            // DNA repair
+            { id: "PARP1", label: "PARP1", type: "Gene", metadata: { role: "Poly(ADP-ribose) polymerase 1, DNA repair" } },
+            // Drugs
+            { id: "CHEMBL:185", label: "Fluorouracil (5-FU)", type: "Drug", metadata: { max_phase: 4, molecular_weight: "130.08", role: "Approved TYMS inhibitor (prodrug → FdUMP)" } },
+            { id: "CHEMBL:225072", label: "Pemetrexed", type: "Drug", metadata: { max_phase: 4, molecular_weight: "427.42", role: "Multi-folate inhibitor (TYMS + DHFR + GARFT)", synonyms: "Alimta, LY-231514" } },
+            // Targets (ChEMBL)
+            { id: "CHEMBL:1952", label: "Thymidylate synthase", type: "Target", metadata: { organism: "Homo sapiens", target_type: "SINGLE PROTEIN" } },
+            { id: "CHEMBL:202", label: "DHFR (target)", type: "Target", metadata: { organism: "Homo sapiens", target_type: "SINGLE PROTEIN" } },
+            { id: "CHEMBL:3972", label: "GARFT", type: "Target", metadata: { name: "Glycinamide ribonucleotide formyltransferase", role: "De novo purine synthesis enzyme" } },
+            // Clinical trial
+            { id: "NCT:06976892", label: "IDOL Trial", type: "ClinicalTrial", metadata: { phase: "Phase I/Ib", status: "RECRUITING", condition: "High Grade Serous Ovarian Cancer", sponsor: "Institute of Cancer Research, UK", start_date: "2025-08" } }
+        ],
+        edges: [
+            // Synthetic lethality (KEY FINDING)
+            { source: "HGNC:11998", target: "HGNC:12441", label: "synthetic_lethal_with" },
+            { source: "HGNC:1925", target: "HGNC:12441", label: "negative_genetic" },
+            // TP53 transcriptional activation
+            { source: "HGNC:11998", target: "HGNC:1784", label: "activates" },
+            { source: "HGNC:11998", target: "HGNC:4095", label: "activates" },
+            // p21 CDK inhibition
+            { source: "HGNC:1784", target: "CDK2", label: "inhibits" },
+            { source: "HGNC:1784", target: "CDK4", label: "inhibits" },
+            { source: "HGNC:1784", target: "CDK6", label: "inhibits" },
+            // Drug mechanisms
+            { source: "CHEMBL:185", target: "CHEMBL:1952", label: "inhibits" },
+            { source: "CHEMBL:225072", target: "CHEMBL:1952", label: "inhibits" },
+            { source: "CHEMBL:225072", target: "CHEMBL:202", label: "inhibits" },
+            { source: "CHEMBL:225072", target: "CHEMBL:3972", label: "inhibits" },
+            // Functional associations
+            { source: "HGNC:12441", target: "DHFR", label: "associated_with" },
+            { source: "HGNC:12441", target: "DUT", label: "associated_with" },
+            // Clinical trial targets
+            { source: "NCT:06976892", target: "HGNC:12441", label: "tested_in" },
+            { source: "NCT:06976892", target: "PARP1", label: "tested_in" }
+        ]
+    };
+    // === END GRAPH DATA ===
+
+    // Node type colors
+    const typeColors = {
+        'Gene': '#4CAF50',
+        'Protein': '#009688',
+        'Drug': '#2196F3',
+        'SmallMolecule': '#2196F3',
+        'Target': '#00BCD4',
+        'Disease': '#F44336',
+        'Pathway': '#9C27B0',
+        'ClinicalTrial': '#FF9800',
+        'Publication': '#607D8B',
+        'default': '#78909C'
+    };
+
+    // Edge predicate colors
+    const predicateColors = {
+        'synthetic_lethal_with': '#e94560',
+        'negative_genetic': '#FF5722',
+        'inhibits': '#2196F3',
+        'activates': '#4CAF50',
+        'associated_with': '#9C27B0',
+        'participates_in': '#9C27B0',
+        'tested_in': '#FF9800',
+        'eligibility_biomarker': '#FFEB3B',
+        'default': '#64748b'
+    };
+
+    function getNodeColor(type) {
+        return typeColors[type] || typeColors['default'];
+    }
+
+    function getEdgeColor(predicate) {
+        return predicateColors[predicate] || predicateColors['default'];
+    }
+
+    // Transform data for Cytoscape
+    const elements = {
+        nodes: graphData.nodes.map(n => ({
+            data: {
+                id: n.id,
+                label: n.label,
+                type: n.type,
+                color: n.color || getNodeColor(n.type),
+                metadata: n.metadata || {}
+            }
+        })),
+        edges: graphData.edges.map((e, i) => ({
+            data: {
+                id: `e${i}`,
+                source: e.source,
+                target: e.target,
+                label: e.label,
+                color: e.color || getEdgeColor(e.label)
+            }
+        }))
+    };
+
+    // Initialize Cytoscape
+    const cy = cytoscape({
+        container: document.getElementById('cy'),
+        elements: elements,
+        style: [
+            {
+                selector: 'node',
+                style: {
+                    'background-color': 'data(color)',
+                    'label': 'data(label)',
+                    'color': '#fff',
+                    'text-valign': 'bottom',
+                    'text-margin-y': 8,
+                    'font-size': '11px',
+                    'font-weight': '600',
+                    'text-outline-color': '#16213e',
+                    'text-outline-width': 2,
+                    'width': 40,
+                    'height': 40,
+                    'border-width': 3,
+                    'border-color': '#fff',
+                    'border-opacity': 0.3
+                }
+            },
+            {
+                selector: 'node:selected',
+                style: {
+                    'border-width': 4,
+                    'border-color': '#e94560',
+                    'border-opacity': 1
+                }
+            },
+            {
+                selector: 'edge',
+                style: {
+                    'width': 2,
+                    'line-color': 'data(color)',
+                    'target-arrow-color': 'data(color)',
+                    'target-arrow-shape': 'triangle',
+                    'curve-style': 'bezier',
+                    'label': 'data(label)',
+                    'font-size': '9px',
+                    'color': '#94a3b8',
+                    'text-rotation': 'autorotate',
+                    'text-margin-y': -10
+                }
+            },
+            {
+                selector: 'edge:selected',
+                style: {
+                    'width': 4,
+                    'line-color': '#e94560',
+                    'target-arrow-color': '#e94560'
+                }
+            }
+        ],
+        layout: { name: 'cose', animate: true, animationDuration: 500, nodeRepulsion: 8000, idealEdgeLength: 80 }
+    });
+
+    // Build legend from actual node types
+    const usedTypes = [...new Set(graphData.nodes.map(n => n.type))];
+    const legendDiv = document.getElementById('legend');
+    usedTypes.forEach(type => {
+        const item = document.createElement('div');
+        item.className = 'legend-item';
+        item.innerHTML = `<div class="legend-color" style="background: ${getNodeColor(type)}"></div>${type}`;
+        legendDiv.appendChild(item);
+    });
+
+    // Stats
+    document.getElementById('stats').textContent =
+        `${graphData.nodes.length} nodes, ${graphData.edges.length} edges`;
+
+    // Node click handler
+    cy.on('tap', 'node', function(evt) {
+        const node = evt.target.data();
+        let html = `<strong>${node.label}</strong><br>`;
+        html += `ID: ${node.id}<br>`;
+        html += `Type: ${node.type}`;
+        if (node.metadata && Object.keys(node.metadata).length > 0) {
+            html += '<br><br>';
+            for (const [key, value] of Object.entries(node.metadata)) {
+                html += `<em>${key}:</em> ${value}<br>`;
+            }
+        }
+        document.getElementById('info').innerHTML = html;
+    });
+
+    // Layout change handler
+    document.getElementById('layout-select').addEventListener('change', function(e) {
+        cy.layout({ name: e.target.value, animate: true, animationDuration: 500 }).run();
+    });
+
+    // Export PNG
+    function exportPNG() {
+        const png = cy.png({ output: 'blob', bg: '#16213e', scale: 2 });
+        const url = URL.createObjectURL(png);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'cq14-knowledge-graph.png';
+        a.click();
+        URL.revokeObjectURL(url);
+    }
+    </script>
+</body>
+</html>
