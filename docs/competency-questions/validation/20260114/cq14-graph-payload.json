@@ -1,0 +1,247 @@
+{
+  "group_id": "cq14-feng-synthetic-lethality",
+  "name": "CQ14: TP53-TYMS Synthetic Lethality Knowledge Graph",
+  "validation_date": "2026-01-14",
+  "nodes": [
+    {
+      "id": "HGNC:11998",
+      "type": "Gene",
+      "symbol": "TP53",
+      "name": "tumor protein p53",
+      "entrez": "7157",
+      "uniprot": "P04637",
+      "ensembl": "ENSG00000141510",
+      "location": "17p13.1",
+      "role": "Tumor suppressor, mutated in ~50% of cancers"
+    },
+    {
+      "id": "HGNC:12441",
+      "type": "Gene",
+      "symbol": "TYMS",
+      "name": "thymidylate synthetase",
+      "entrez": "7298",
+      "uniprot": "P04818",
+      "ensembl": "ENSG00000176890",
+      "location": "18p11.32",
+      "role": "Rate-limiting enzyme in dTMP synthesis"
+    },
+    {
+      "id": "HGNC:1784",
+      "type": "Gene",
+      "symbol": "CDKN1A",
+      "name": "cyclin dependent kinase inhibitor 1A",
+      "aliases": ["p21", "CIP1", "WAF1"],
+      "entrez": "1026",
+      "uniprot": "P38936",
+      "ensembl": "ENSG00000124762",
+      "role": "G1/S checkpoint mediator, TP53 target gene"
+    },
+    {
+      "id": "HGNC:4095",
+      "type": "Gene",
+      "symbol": "GADD45A",
+      "name": "growth arrest and DNA damage inducible alpha",
+      "entrez": "1647",
+      "uniprot": "P24522",
+      "ensembl": "ENSG00000116717",
+      "role": "DNA repair coordinator, TP53 target gene"
+    },
+    {
+      "id": "HGNC:1925",
+      "type": "Gene",
+      "symbol": "CHEK1",
+      "name": "checkpoint kinase 1",
+      "role": "Intra-S and G2/M checkpoint kinase"
+    },
+    {
+      "id": "CHEMBL:185",
+      "type": "Compound",
+      "name": "Fluorouracil",
+      "synonyms": ["5-FU", "5-fluorouracil", "Adrucil"],
+      "max_phase": 4,
+      "molecular_weight": 130.08,
+      "smiles": "O=c1[nH]cc(F)c(=O)[nH]1",
+      "role": "Approved TYMS inhibitor (prodrug -> FdUMP)"
+    },
+    {
+      "id": "CHEMBL:225072",
+      "type": "Compound",
+      "name": "Pemetrexed",
+      "synonyms": ["Alimta", "LY-231514"],
+      "max_phase": 4,
+      "molecular_weight": 427.42,
+      "role": "Multi-folate inhibitor (TYMS + DHFR + GARFT)"
+    },
+    {
+      "id": "CHEMBL:1952",
+      "type": "Target",
+      "name": "Thymidylate synthase",
+      "organism": "Homo sapiens",
+      "target_type": "SINGLE PROTEIN"
+    },
+    {
+      "id": "CHEMBL:202",
+      "type": "Target",
+      "name": "Dihydrofolate reductase",
+      "organism": "Homo sapiens",
+      "target_type": "SINGLE PROTEIN"
+    },
+    {
+      "id": "CHEMBL:3972",
+      "type": "Target",
+      "name": "Glycinamide ribonucleotide formyltransferase",
+      "aliases": ["GARFT", "GART"],
+      "organism": "Homo sapiens",
+      "role": "De novo purine synthesis enzyme"
+    },
+    {
+      "id": "NCT:06976892",
+      "type": "ClinicalTrial",
+      "title": "IDOL Trial: Idetrexed + Olaparib for Ovarian Cancer",
+      "phase": "Phase I/Ib",
+      "status": "RECRUITING",
+      "condition": "High Grade Serous Ovarian Cancer",
+      "sponsor": "Institute of Cancer Research, United Kingdom",
+      "start_date": "2025-08",
+      "url": "https://clinicaltrials.gov/study/NCT06976892"
+    }
+  ],
+  "edges": [
+    {
+      "source": "HGNC:11998",
+      "target": "HGNC:12441",
+      "type": "SYNTHETIC_LETHAL_WITH",
+      "evidence": "BioGRID Negative Genetic interaction",
+      "pubmed": "35559673",
+      "year": 2022
+    },
+    {
+      "source": "HGNC:1925",
+      "target": "HGNC:12441",
+      "type": "NEGATIVE_GENETIC",
+      "evidence": "BioGRID",
+      "pubmed": "28319113"
+    },
+    {
+      "source": "HGNC:11998",
+      "target": "HGNC:1784",
+      "type": "TRANSCRIPTIONALLY_ACTIVATES",
+      "evidence": "UniProt function annotation",
+      "note": "p21 mediates TP53-dependent G1/S arrest"
+    },
+    {
+      "source": "HGNC:11998",
+      "target": "HGNC:4095",
+      "type": "TRANSCRIPTIONALLY_ACTIVATES",
+      "evidence": "UniProt function annotation",
+      "note": "GADD45A coordinates DNA repair response"
+    },
+    {
+      "source": "HGNC:1784",
+      "target": "CDK2",
+      "type": "INHIBITS",
+      "evidence": "STRING",
+      "score": 0.999
+    },
+    {
+      "source": "HGNC:1784",
+      "target": "CDK4",
+      "type": "INHIBITS",
+      "evidence": "STRING",
+      "score": 0.999
+    },
+    {
+      "source": "HGNC:1784",
+      "target": "CDK6",
+      "type": "INHIBITS",
+      "evidence": "STRING",
+      "score": 0.999
+    },
+    {
+      "source": "CHEMBL:185",
+      "target": "CHEMBL:1952",
+      "type": "INHIBITOR",
+      "evidence": "ChEMBL mechanism API",
+      "note": "Converted to FdUMP which forms covalent ternary complex"
+    },
+    {
+      "source": "CHEMBL:225072",
+      "target": "CHEMBL:1952",
+      "type": "INHIBITOR",
+      "evidence": "ChEMBL mechanism API"
+    },
+    {
+      "source": "CHEMBL:225072",
+      "target": "CHEMBL:202",
+      "type": "INHIBITOR",
+      "evidence": "ChEMBL mechanism API"
+    },
+    {
+      "source": "CHEMBL:225072",
+      "target": "CHEMBL:3972",
+      "type": "INHIBITOR",
+      "evidence": "ChEMBL mechanism API",
+      "note": "GARFT inhibition disrupts purine synthesis"
+    },
+    {
+      "source": "HGNC:12441",
+      "target": "DHFR",
+      "type": "FUNCTIONALLY_ASSOCIATED",
+      "evidence": "STRING",
+      "score": 0.958,
+      "note": "Folate cycle partners"
+    },
+    {
+      "source": "HGNC:12441",
+      "target": "DUT",
+      "type": "FUNCTIONALLY_ASSOCIATED",
+      "evidence": "STRING",
+      "score": 0.955,
+      "note": "DUT provides dUMP substrate"
+    },
+    {
+      "source": "NCT:06976892",
+      "target": "HGNC:12441",
+      "type": "TARGETS",
+      "drug": "Idetrexed",
+      "note": "Alpha-folate receptor targeted TYMS inhibitor"
+    },
+    {
+      "source": "NCT:06976892",
+      "target": "PARP1",
+      "type": "TARGETS",
+      "drug": "Olaparib",
+      "note": "PARP inhibitor blocks DNA repair"
+    }
+  ],
+  "provenance": {
+    "mcp_tools_used": [
+      "hgnc_search_genes",
+      "hgnc_get_gene",
+      "uniprot_get_protein",
+      "chembl_search_compounds",
+      "chembl_get_compound",
+      "string_get_interactions",
+      "biogrid_get_interactions",
+      "clinicaltrials_search_trials",
+      "clinicaltrials_get_trial"
+    ],
+    "curl_endpoints": [
+      "https://www.ebi.ac.uk/chembl/api/data/mechanism",
+      "https://www.ebi.ac.uk/chembl/api/data/target"
+    ],
+    "validation_agents": [
+      "Gene identifier validator",
+      "Drug-target mechanism validator",
+      "Clinical trial validator",
+      "Synthetic lethality evidence validator"
+    ],
+    "cross_validation": "Gemini"
+  },
+  "key_findings": {
+    "typo_corrected": "NCT:06975892 -> NCT:06976892 (fifth digit)",
+    "bonus_discovery": "Direct TP53-TYMS negative genetic interaction (PubMed: 35559673)",
+    "additional_target": "Pemetrexed also inhibits GARFT (CHEMBL:3972)",
+    "mechanism": "Triple threat: Nucleotide depletion + DNA repair block + checkpoint failure"
+  }
+}
