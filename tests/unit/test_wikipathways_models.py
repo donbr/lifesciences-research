@@ -16,6 +16,8 @@ from lifesciences_mcp.models import (
     RevisionMetadata,
 )
 
+pytestmark = [pytest.mark.unit, pytest.mark.wikipathways]
+
 
 class TestRevisionMetadata:
     """Tests for RevisionMetadata model."""

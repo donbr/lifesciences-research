@@ -11,6 +11,7 @@ from lifesciences_mcp.models.protein import Protein, ProteinSearchCandidate
 
 
 @pytest.mark.integration
+@pytest.mark.uniprot
 class TestUniProtClientIntegration:
     """Integration tests for UniProtClient."""
 
@@ -306,6 +307,7 @@ class TestUniProtClientIntegration:
 
 
 @pytest.mark.integration
+@pytest.mark.uniprot
 class TestUniProtSearchValidation:
     """Test validation and error handling for search operations."""
 

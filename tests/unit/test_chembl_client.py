@@ -8,6 +8,8 @@ import pytest
 from lifesciences_mcp.clients.chembl import ChEMBLClient
 from lifesciences_mcp.models.envelopes import ErrorCode, ErrorEnvelope
 
+pytestmark = [pytest.mark.unit, pytest.mark.chembl]
+
 
 class TestChEMBLClientCurieValidation:
     """Tests for CURIE validation."""

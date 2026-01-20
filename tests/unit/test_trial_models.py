@@ -18,6 +18,8 @@ from lifesciences_mcp.models.trial import (
     TrialSearchCandidate,
 )
 
+pytestmark = [pytest.mark.unit, pytest.mark.clinicaltrials]
+
 # ==============================================================================
 # T013: TrialSearchCandidate Tests (US1)
 # ==============================================================================

@@ -11,6 +11,8 @@ from lifesciences_mcp.models.envelopes import (
 from lifesciences_mcp.models.cross_references import CrossReferences
 from lifesciences_mcp.models.gene import Gene, SearchCandidate
 
+pytestmark = pytest.mark.unit
+
 
 class TestSearchCandidate:
     """Tests for SearchCandidate model."""

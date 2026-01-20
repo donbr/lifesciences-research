@@ -6,7 +6,11 @@ for autonomous error correction by AI agents (User Story 4).
 Run with: pytest tests/unit/test_error_envelopes.py -v
 """
 
+import pytest
+
 from lifesciences_mcp.models.envelopes import ErrorCode, ErrorDetail, ErrorEnvelope
+
+pytestmark = pytest.mark.unit
 
 
 class TestErrorRecoveryHints:

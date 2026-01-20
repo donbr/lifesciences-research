@@ -273,8 +273,11 @@ def sample_target() -> Target:
 
 
 @pytest.fixture
-async def iuphar_client() -> AsyncGenerator[IUPHARClient, None]:
-    """Real IUPHARClient for integration tests."""
+async def iuphar_client(check_iuphar_available) -> AsyncGenerator[IUPHARClient, None]:
+    """Real IUPHARClient for integration tests.
+
+    Automatically skips if IUPHAR API is unavailable.
+    """
     client = IUPHARClient()
     yield client
     await client.close()

@@ -8,6 +8,8 @@ import pytest
 from lifesciences_mcp.clients.drugbank import DrugBankClient
 from lifesciences_mcp.models.envelopes import ErrorEnvelope, PaginationEnvelope
 
+pytestmark = [pytest.mark.unit, pytest.mark.drugbank]
+
 
 class TestDrugBankClientValidation:
     """Test input validation without API calls."""

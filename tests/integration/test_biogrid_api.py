@@ -23,13 +23,17 @@ from lifesciences_mcp.models.biogrid import (
 from lifesciences_mcp.models.envelopes import ErrorEnvelope, PaginationEnvelope
 
 # Skip all tests if no API key
-pytestmark = pytest.mark.skipif(
-    not os.getenv("BIOGRID_API_KEY"),
-    reason="BIOGRID_API_KEY not set. Get free key at https://webservice.thebiogrid.org/",
-)
+pytestmark = [
+    pytest.mark.biogrid,
+    pytest.mark.skipif(
+        not os.getenv("BIOGRID_API_KEY"),
+        reason="BIOGRID_API_KEY not set. Get free key at https://webservice.thebiogrid.org/",
+    ),
+]
 
 
 @pytest.mark.integration
+@pytest.mark.biogrid
 class TestBioGridClientIntegration:
     """Integration tests for BioGridClient with real BioGRID API."""
 

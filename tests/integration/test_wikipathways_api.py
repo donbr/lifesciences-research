@@ -11,12 +11,16 @@ from lifesciences_mcp.models.envelopes import ErrorEnvelope, PaginationEnvelope
 
 
 @pytest.mark.integration
+@pytest.mark.wikipathways
 class TestWikiPathwaysClientIntegration:
     """Integration tests for WikiPathwaysClient with real WikiPathways API."""
 
     @pytest.fixture
-    async def client(self):
-        """Create a WikiPathways client."""
+    async def client(self, check_wikipathways_available):
+        """Create a WikiPathways client.
+
+        Automatically skips if WikiPathways API is unavailable.
+        """
         client = WikiPathwaysClient()
         yield client
         await client.close()
@@ -191,6 +195,7 @@ class TestWikiPathwaysClientIntegration:
 
 
 @pytest.mark.integration
+@pytest.mark.wikipathways
 async def test_search_short_query():
     """Test that short queries return AMBIGUOUS_QUERY error."""
     client = WikiPathwaysClient()
@@ -207,12 +212,16 @@ async def test_search_short_query():
 
 
 @pytest.mark.integration
+@pytest.mark.wikipathways
 class TestWikiPathwaysGeneToPathwayLookup:
     """Integration tests for reverse gene-to-pathway lookup (User Story 3)."""
 
     @pytest.fixture
-    async def client(self):
-        """Create a WikiPathways client."""
+    async def client(self, check_wikipathways_available):
+        """Create a WikiPathways client.
+
+        Automatically skips if WikiPathways API is unavailable.
+        """
         client = WikiPathwaysClient()
         yield client
         await client.close()
@@ -295,12 +304,16 @@ class TestWikiPathwaysGeneToPathwayLookup:
 
 
 @pytest.mark.integration
+@pytest.mark.wikipathways
 class TestWikiPathwaysComponentExtraction:
     """Integration tests for pathway component extraction (User Story 4)."""
 
     @pytest.fixture
-    async def client(self):
-        """Create a WikiPathways client."""
+    async def client(self, check_wikipathways_available):
+        """Create a WikiPathways client.
+
+        Automatically skips if WikiPathways API is unavailable.
+        """
         client = WikiPathwaysClient()
         yield client
         await client.close()

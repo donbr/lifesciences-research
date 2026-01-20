@@ -8,6 +8,8 @@ from lifesciences_mcp.models.pubchem_compound import (
     PubChemSearchCandidate,
 )
 
+pytestmark = [pytest.mark.unit, pytest.mark.pubchem]
+
 
 class TestPubChemSearchCandidate:
     """Tests for PubChemSearchCandidate model (T055-T057)."""

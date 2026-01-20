@@ -18,12 +18,16 @@ from lifesciences_mcp.models.envelopes import ErrorEnvelope, PaginationEnvelope
 
 
 @pytest.mark.integration
+@pytest.mark.entrez
 class TestEntrezClientSearchGenes:
     """Integration tests for EntrezClient.search_genes - User Story 1."""
 
     @pytest.fixture
-    async def client(self):
-        """Create an Entrez client."""
+    async def client(self, check_entrez_available):
+        """Create an Entrez client.
+
+        Automatically skips if Entrez API is unavailable.
+        """
         client = EntrezClient()
         yield client
         await client.close()
@@ -119,12 +123,16 @@ class TestEntrezClientSearchGenes:
 
 
 @pytest.mark.integration
+@pytest.mark.entrez
 class TestEntrezClientGetGene:
     """Integration tests for EntrezClient.get_gene - User Story 2."""
 
     @pytest.fixture
-    async def client(self):
-        """Create an Entrez client."""
+    async def client(self, check_entrez_available):
+        """Create an Entrez client.
+
+        Automatically skips if Entrez API is unavailable.
+        """
         client = EntrezClient()
         yield client
         await client.close()
@@ -209,12 +217,16 @@ class TestEntrezClientGetGene:
 
 
 @pytest.mark.integration
+@pytest.mark.entrez
 class TestEntrezClientPubMedLinks:
     """Integration tests for EntrezClient.get_pubmed_links - User Story 3."""
 
     @pytest.fixture
-    async def client(self):
-        """Create an Entrez client."""
+    async def client(self, check_entrez_available):
+        """Create an Entrez client.
+
+        Automatically skips if Entrez API is unavailable.
+        """
         client = EntrezClient()
         yield client
         await client.close()
@@ -254,12 +266,16 @@ class TestEntrezClientPubMedLinks:
 
 
 @pytest.mark.integration
+@pytest.mark.entrez
 class TestEntrezClientErrorRecovery:
     """Integration tests for error recovery - User Story 4."""
 
     @pytest.fixture
-    async def client(self):
-        """Create an Entrez client."""
+    async def client(self, check_entrez_available):
+        """Create an Entrez client.
+
+        Automatically skips if Entrez API is unavailable.
+        """
         client = EntrezClient()
         yield client
         await client.close()
@@ -323,12 +339,16 @@ class TestEntrezClientErrorRecovery:
 
 
 @pytest.mark.integration
+@pytest.mark.entrez
 class TestEntrezFuzzyToFactWorkflow:
     """Integration tests for complete Fuzzy-to-Fact protocol."""
 
     @pytest.fixture
-    async def client(self):
-        """Create an Entrez client."""
+    async def client(self, check_entrez_available):
+        """Create an Entrez client.
+
+        Automatically skips if Entrez API is unavailable.
+        """
         client = EntrezClient()
         yield client
         await client.close()

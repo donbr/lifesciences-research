@@ -7,6 +7,8 @@ import pytest
 
 from lifesciences_mcp.clients.wikipathways import WikiPathwaysClient
 
+pytestmark = [pytest.mark.unit, pytest.mark.wikipathways]
+
 
 class TestWikiPathwaysClient:
     """Tests for WikiPathwaysClient helper methods."""

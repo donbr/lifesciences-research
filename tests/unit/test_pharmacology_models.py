@@ -16,6 +16,8 @@ from lifesciences_mcp.models.pharmacology import (
     TargetSearchCandidate,
 )
 
+pytestmark = pytest.mark.unit
+
 # =============================================================================
 # T071-T072: IUPHAR CURIE Pattern Validation
 # =============================================================================

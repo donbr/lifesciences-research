@@ -20,12 +20,15 @@ from lifesciences_mcp.models.ensembl import (
 from lifesciences_mcp.models.envelopes import ErrorEnvelope, PaginationEnvelope
 
 # Mark all tests in this module as integration tests
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.ensembl]
 
 
 @pytest.fixture
-async def client():
-    """Create an Ensembl client for testing."""
+async def client(check_ensembl_available):
+    """Create an Ensembl client for testing.
+
+    Automatically skips if Ensembl API is unavailable.
+    """
     async with EnsemblClient() as client:
         yield client
 

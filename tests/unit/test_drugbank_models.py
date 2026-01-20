@@ -10,6 +10,8 @@ from lifesciences_mcp.models.drug import (
     DrugSearchCandidate,
 )
 
+pytestmark = [pytest.mark.unit, pytest.mark.drugbank]
+
 
 class TestDrugBankCuriePattern:
     """Test DrugBank CURIE validation pattern."""

@@ -11,6 +11,8 @@ import pytest
 from lifesciences_mcp.clients import ClinicalTrialsClient
 from lifesciences_mcp.models import PaginationEnvelope
 
+pytestmark = [pytest.mark.unit, pytest.mark.clinicaltrials]
+
 
 class TestClinicalTrialsClient:
     """Unit tests for ClinicalTrialsClient."""

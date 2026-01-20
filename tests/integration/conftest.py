@@ -90,3 +90,53 @@ async def check_chembl_available():
     except Exception as e:
         pytest.skip(f"ChEMBL health check failed: {e}")
     return False
+
+
+@pytest.fixture(scope="function")
+async def check_ensembl_available():
+    """Check if Ensembl REST API is reachable before running tests.
+
+    Uses the dedicated /info/ping endpoint for health checks.
+    Skips tests if the service is down to prevent cascading failures.
+    """
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=5.0, read=5.0, write=5.0, pool=5.0)
+        ) as client:
+            response = await client.get(
+                "https://rest.ensembl.org/info/ping",
+                headers={"Content-Type": "application/json"},
+            )
+            if response.status_code == 200:
+                data = response.json()
+                if data.get("ping") == 1:
+                    return True
+            pytest.skip(f"Ensembl API unhealthy: status={response.status_code}")
+    except (httpx.TimeoutException, httpx.ConnectError) as e:
+        pytest.skip(f"Ensembl API unavailable: {e}")
+    except Exception as e:
+        pytest.skip(f"Ensembl health check failed: {e}")
+    return False
+
+
+@pytest.fixture(scope="function")
+async def check_entrez_available():
+    """Check if NCBI Entrez service is reachable before running tests.
+
+    Uses einfo as a lightweight health check endpoint.
+    """
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=5.0, read=10.0, write=5.0, pool=5.0)
+        ) as client:
+            response = await client.get(
+                "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/einfo.fcgi",
+                params={"retmode": "json"},
+            )
+            if response.status_code == 200:
+                return True
+    except (httpx.TimeoutException, httpx.ConnectError) as e:
+        pytest.skip(f"NCBI Entrez service unavailable: {e}")
+    except Exception as e:
+        pytest.skip(f"Entrez health check failed: {e}")
+    return False

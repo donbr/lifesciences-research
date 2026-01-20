@@ -7,6 +7,8 @@ from unittest.mock import MagicMock, patch
 from lifesciences_mcp.clients.chembl import ChEMBLClient
 from lifesciences_mcp.models.envelopes import ErrorCode, ErrorEnvelope
 
+pytestmark = pytest.mark.chembl
+
 
 @pytest.mark.asyncio
 async def test_chembl_client_timeout_enforcement():

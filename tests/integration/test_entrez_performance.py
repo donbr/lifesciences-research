@@ -13,12 +13,16 @@ from lifesciences_mcp.clients import EntrezClient
 
 
 @pytest.mark.integration
+@pytest.mark.entrez
 class TestEntrezPerformance:
     """Performance tests validating SC-001 success criterion."""
 
     @pytest.fixture
-    async def client(self):
-        """Create an Entrez client."""
+    async def client(self, check_entrez_available):
+        """Create an Entrez client.
+
+        Automatically skips if Entrez API is unavailable.
+        """
         client = EntrezClient()
         yield client
         await client.close()

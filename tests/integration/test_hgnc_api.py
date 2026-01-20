@@ -12,6 +12,7 @@ from lifesciences_mcp.models.gene import Gene
 
 
 @pytest.mark.integration
+@pytest.mark.hgnc
 class TestHGNCClientIntegration:
     """Integration tests for HGNCClient with real HGNC API."""
 
@@ -107,6 +108,7 @@ class TestHGNCClientIntegration:
 
 
 @pytest.mark.integration
+@pytest.mark.hgnc
 async def test_search_short_query():
     """Test that short queries return AMBIGUOUS_QUERY error."""
     client = HGNCClient()

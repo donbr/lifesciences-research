@@ -17,6 +17,7 @@ from lifesciences_mcp.models.envelopes import ErrorEnvelope, PaginationEnvelope
 # Skip all tests in this module if no API key
 pytestmark = [
     pytest.mark.integration,
+    pytest.mark.drugbank,
     pytest.mark.skipif(
         not os.environ.get("DRUGBANK_API_KEY"),
         reason="DRUGBANK_API_KEY not set - skipping DrugBank integration tests",

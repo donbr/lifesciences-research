@@ -11,6 +11,7 @@ from lifesciences_mcp.models.target import Target
 
 
 @pytest.mark.integration
+@pytest.mark.opentargets
 class TestOpenTargetsClientIntegration:
     """Integration tests for OpenTargetsClient."""
 
@@ -119,6 +120,7 @@ class TestOpenTargetsClientIntegration:
 
 
 @pytest.mark.integration
+@pytest.mark.opentargets
 class TestFuzzyToFactWorkflow:
     """Test the complete Fuzzy-to-Fact workflow."""
 

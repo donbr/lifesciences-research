@@ -16,6 +16,8 @@ from lifesciences_mcp.clients.ensembl import (
 )
 from lifesciences_mcp.models.envelopes import ErrorEnvelope
 
+pytestmark = [pytest.mark.unit, pytest.mark.ensembl]
+
 # ==============================================================================
 # Client Initialization Tests
 # ==============================================================================
