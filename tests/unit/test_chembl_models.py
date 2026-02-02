@@ -132,6 +132,45 @@ class TestCompoundSearchCandidate:
         assert candidate.name is None
         assert candidate.molecular_formula is None
 
+    def test_is_parent_true(self) -> None:
+        """Test is_parent=True for parent compounds."""
+        candidate = CompoundSearchCandidate(
+            id="CHEMBL:225072",
+            name="PEMETREXED",
+            score=0.85,
+            is_parent=True,
+        )
+        assert candidate.is_parent is True
+
+    def test_is_parent_false(self) -> None:
+        """Test is_parent=False for salt/hydrate forms."""
+        candidate = CompoundSearchCandidate(
+            id="CHEMBL:2360464",
+            name="PEMETREXED DISODIUM",
+            score=1.0,
+            is_parent=False,
+        )
+        assert candidate.is_parent is False
+
+    def test_is_parent_none(self) -> None:
+        """Test is_parent=None when hierarchy data unavailable."""
+        candidate = CompoundSearchCandidate(
+            id="CHEMBL:25",
+            name="Aspirin",
+            score=1.0,
+            is_parent=None,
+        )
+        assert candidate.is_parent is None
+
+    def test_is_parent_default_none(self) -> None:
+        """Test is_parent defaults to None when not provided."""
+        candidate = CompoundSearchCandidate(
+            id="CHEMBL:25",
+            name="Aspirin",
+            score=1.0,
+        )
+        assert candidate.is_parent is None
+
 
 class TestCompound:
     """Tests for Compound model (T017: US2)."""

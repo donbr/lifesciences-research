@@ -96,6 +96,32 @@ class TestSearchCompoundsIntegration:
         scores = [item.score for item in result.items]
         assert scores == sorted(scores, reverse=True), "Scores should be descending"
 
+    async def test_search_returns_is_parent_field(self, client: ChEMBLClient):
+        """Test: search "pemetrexed" returns is_parent field distinguishing parent from salts.
+
+        Pemetrexed is a good test case because:
+        - CHEMBL:225072 (PEMETREXED) is the parent compound (is_parent=True)
+        - CHEMBL:2360464 (PEMETREXED DISODIUM) is a salt form (is_parent=False)
+        """
+        result = await client.search_compounds("pemetrexed", page_size=20)
+
+        assert isinstance(result, PaginationEnvelope)
+        assert len(result.items) > 0
+
+        # Collect is_parent values
+        parents = [item for item in result.items if item.is_parent is True]
+        salts = [item for item in result.items if item.is_parent is False]
+
+        # Should have at least one parent and one salt
+        assert len(parents) >= 1, "Expected at least one parent compound (is_parent=True)"
+        assert len(salts) >= 1, "Expected at least one salt form (is_parent=False)"
+
+        # Verify PEMETREXED (CHEMBL:225072) is marked as parent
+        parent_ids = [item.id for item in parents]
+        assert "CHEMBL:225072" in parent_ids, (
+            f"CHEMBL:225072 (PEMETREXED) should be is_parent=True, got parents: {parent_ids}"
+        )
+
 
 @pytest.mark.integration
 @pytest.mark.chembl

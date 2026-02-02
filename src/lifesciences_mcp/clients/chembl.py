@@ -289,11 +289,22 @@ class ChEMBLClient(LifeSciencesClient):
         # First result = 1.0, decreasing by 0.05 per position, minimum 0.1
         score = max(0.1, 1.0 - (index * 0.05))
 
+        # Extract parent compound info from molecule_hierarchy
+        # Parent compounds have molecule_chembl_id == parent_chembl_id
+        hierarchy = sdk_result.get("molecule_hierarchy") or {}
+        parent_chembl_id = hierarchy.get("parent_chembl_id")
+
+        # Determine if this is the parent compound
+        is_parent: bool | None = None
+        if parent_chembl_id and raw_id:
+            is_parent = raw_id == parent_chembl_id
+
         return CompoundSearchCandidate(
             id=curie,
             name=name,
             molecular_formula=molecular_formula,
             score=score,
+            is_parent=is_parent,
         )
 
     def _build_cross_references(self, sdk_result: dict[str, Any]) -> dict[str, list[str]]:

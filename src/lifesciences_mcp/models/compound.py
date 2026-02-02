@@ -46,6 +46,11 @@ class CompoundSearchCandidate(BaseModel):
         description="Relevance score (1.0 = perfect match, decreasing linearly)",
     )
 
+    is_parent: bool | None = Field(
+        None,
+        description="True if this is the parent compound (not a salt/hydrate form). None if hierarchy data unavailable.",
+    )
+
     @field_validator("id")
     @classmethod
     def validate_chembl_curie(cls, v: str) -> str:
@@ -64,6 +69,7 @@ class CompoundSearchCandidate(BaseModel):
                     "name": "Aspirin",
                     "molecular_formula": "C9H8O4",
                     "score": 1.0,
+                    "is_parent": True,
                 }
             ]
         }
