@@ -21,7 +21,7 @@ Validate synthetic lethality hypotheses using BioGRID ORCS CRISPR screen data vi
 **IMPORTANT**: Use `orcsws.thebiogrid.org` (NOT `orcs.thebiogrid.org`)
 
 - **Base URL**: `https://orcsws.thebiogrid.org`
-- **Auth**: Requires `BIOGRID_API_KEY` (free: https://webservice.thebiogrid.org/)
+- **Auth**: Requires `BIOGRID_API_KEY` which is captured in `.env` file
 - **Rate Limit**: ~10 req/s
 - **Formats**: `format=tab` (default) or `format=json`
 

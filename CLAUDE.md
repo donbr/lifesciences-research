@@ -252,9 +252,9 @@ For detailed server documentation (API details, rate limits, workflows), see the
 
 **Note:** ClinicalTrials.gov integration tests blocked by Cloudflare. See Manual Testing section above for curl-based verification.  This does not impact production MCP usage.
 
-**Note:** BioGRID requires free API key (`BIOGRID_API_KEY`) from https://webservice.thebiogrid.org/.  The API key exists in the current environment.
+**Note:** BioGRID requires free API key (`BIOGRID_API_KEY`) from https://webservice.thebiogrid.org/.  The API key exists in the current environment in the `.env` file.
 
-**Note:** NCBI/Entrez optionally uses `NCBI_API_KEY` for higher rate limits (3→10 req/s). Free at https://www.ncbi.nlm.nih.gov/account/settings/  . The API key exists in the current environment.
+**Note:** NCBI/Entrez optionally uses `NCBI_API_KEY` for higher rate limits (3→10 req/s). Free at https://www.ncbi.nlm.nih.gov/account/settings/  . The API key exists in the current environment in the `.env` file.
 
 ### Core Patterns
 
@@ -322,3 +322,17 @@ git switch -c implement/<id>-<description>
 - Fuzzy-to-Fact protocol (fuzzy search → CURIE resolution → strict lookup)
 - Agentic Biolink schema (flattened JSON with cross_references)
 - Token budgeting (`slim=True` parameter for batch operations)
+
+## Future Work / Technical Debt
+
+### Health Check Fixture Scope Optimization (PR #18 Review Feedback)
+
+**Context:** PR #18 added health check fixtures to integration tests. Currently, fixtures use `scope="function"` (default), meaning each test function triggers a health check HTTP request.
+
+**Proposed Improvement:** Change scope to `scope="session"` or `scope="module"` so health checks run once per test session/module rather than per test function. This reduces redundant API calls during test runs.
+
+**Location:** `tests/integration/conftest.py` - all `check_*_available` fixtures
+
+**Trade-off:** Session scope is more efficient but means if an API goes down mid-test-run, subsequent tests won't skip. Module scope is a middle ground.
+
+**Reference:** PR #18 review comment suggested this optimization.

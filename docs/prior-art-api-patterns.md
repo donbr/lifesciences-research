@@ -148,6 +148,50 @@ This validates our MCP server approach—structured API access demonstrably impr
 
 ---
 
+## 4.5 The CURIE Standard Foundation
+
+CURIEs (Compact URIs) provide the identifier interoperability layer for this architecture. Understanding the formal specifications underpinning CURIEs is essential for proper implementation.
+
+### W3C Specification
+
+The [W3C CURIE Syntax 1.0](https://www.w3.org/TR/2010/NOTE-curie-20101216/) (2010) formally defines:
+- **Format:** `PREFIX:LOCAL_ID` (e.g., `HGNC:1100`, `UniProtKB:P38398`)
+- **Safe CURIEs:** Bracketed form `[PREFIX:LOCAL_ID]` for unambiguous parsing
+- Integration with [JSON-LD 1.1](https://www.w3.org/TR/json-ld11/) for Linked Data contexts
+
+### Authoritative Registries
+
+| Registry | Purpose | URL |
+|----------|---------|-----|
+| **Bioregistry** | Canonical prefix definitions for life sciences | https://bioregistry.io/ |
+| **Identifiers.org** | CURIE resolution service | https://identifiers.org/ |
+| **Node Normalizer** | NCATS Translator ID transformation | https://github.com/TranslatorSRI/NodeNormalization |
+
+### Transformation Pattern
+
+CURIEs are used at the API layer for interoperability, then transformed for underlying database calls:
+
+```
+MCP Tool Layer:     get_gene("HGNC:11110")
+                          │
+                          ▼ strip prefix
+HGNC REST API:      /fetch/hgnc_id/11110
+```
+
+This pattern is explicitly documented in BioThings Explorer (Callaghan et al., 2023):
+
+> "BioThings Explorer also performs **ID-to-object translation**, which facilitates the chaining of API calls from one step in the query-path to the next step. This ID translation step is critical when successive APIs in the query-path plan use different identifiers to represent the same biomedical entity."
+
+### Validation Resources
+
+| Resource | Purpose |
+|----------|---------|
+| [Bioregistry Prefix Lookup](https://bioregistry.io/registry/) | Validate CURIE prefix canonicalization |
+| [Biopragmatics CURIE Guide](https://cthoyt.com/2021/09/14/curies.html) | Practical tutorial on CURIE usage |
+| ADR-001 §A Cross-Reference Registry | Project-specific CURIE format specifications |
+
+---
+
 ## 5. 2025-2026 LLM + API Research
 
 ### Key Papers on Knowledge-Augmented LLMs
@@ -233,7 +277,7 @@ cross_references: {
     "hgnc": "HGNC:1100",
     "uniprot": ["P38398"],
     "ensembl_gene": "ENSG00000012048",
-    "chembl": ["CHEMBL:1824"],
+    "chembl": ["CHEMBL1824"],
     ...
 }
 ```
@@ -421,13 +465,21 @@ Embracing alignment with standards like TRAPI, Biolink, and the Fuzzy-to-Fact pa
 
 8. **Harvard Knowledge Graph Agent** (2025). "Systematic generation, review, and revision of Medical KGs." *Predictive Systems AI*. [link](https://predictivesystems.ai/research)
 
+### Standards and Registries
+
+9. **W3C CURIE Syntax 1.0** (2010). "CURIE Syntax 1.0: A syntax for expressing Compact URIs." W3C Working Group Note. [https://www.w3.org/TR/2010/NOTE-curie-20101216/](https://www.w3.org/TR/2010/NOTE-curie-20101216/)
+
+10. Hoyt CT, et al. (2022). "Unifying the identification of biomedical entities with the Bioregistry." *Scientific Data*, 9:714. [DOI: 10.1038/s41597-022-01807-3](https://doi.org/10.1038/s41597-022-01807-3)
+
+11. **Node Normalizer** (2022). "NCATS Translator Node Normalization Service." GitHub. [https://github.com/TranslatorSRI/NodeNormalization](https://github.com/TranslatorSRI/NodeNormalization)
+
 ---
 
 ## Appendix: Key Terms for Research Agents
 
 | Term | Definition | Example |
 |------|------------|---------|
-| **CURIE** | Compact URI (PREFIX:LOCAL_ID) | `HGNC:1100`, `UniProtKB:P38398` |
+| **CURIE** | Compact URI (PREFIX:LOCAL_ID) per [W3C CURIE Syntax 1.0](https://www.w3.org/TR/curie/) | `HGNC:1100`, `UniProtKB:P38398` |
 | **Fuzzy-to-Fact** | Two-phase resolution: ambiguous → candidates → strict lookup | `search_genes("brca1")` → `get_gene("HGNC:1100")` |
 | **Agentic Biolink** | Flattened JSON schema with standardized `cross_references` | See ADR-001 §4-5 |
 | **MCP** | Model Context Protocol (Anthropic standard for LLM tool access) | FastMCP server implementation |
@@ -446,3 +498,4 @@ Embracing alignment with standards like TRAPI, Biolink, and the Fuzzy-to-Fact pa
 | 1.2.0 | 2026-01-10 | Added §7.5 Node/Edge separation pattern; updated cross-ref count to 23 |
 | 1.3.0 | 2026-01-10 | Added §7.6 Competency Questions alignment with BTE-RAG benchmarks |
 | 1.4.0 | 2026-01-10 | Added §8 quantitative evidence and prior art documentation value |
+| 1.5.0 | 2026-01-24 | Added §4.5 CURIE Standard Foundation; W3C and Bioregistry references; fixed ChEMBL CURIE format |
