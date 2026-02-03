@@ -1,0 +1,145 @@
+{
+  "research_context": {
+    "competency_question": "CQ14",
+    "source": "Feng et al., Sci. Adv. 8, eabm6638 (2022)",
+    "pubmed_id": "PMC9098673",
+    "research_question": "How can we validate synthetic lethal gene pairs from Feng et al. (2022) and identify druggable opportunities for TP53-mutant cancers?"
+  },
+  "nodes": {
+    "genes": [
+      {
+        "id": "HGNC:11998",
+        "type": "Gene",
+        "symbol": "TP53",
+        "name": "tumor protein p53",
+        "location": "17p13.1",
+        "role": "Tumor suppressor (mutated in 50% of cancers)",
+        "cross_references": {
+          "ensembl": "ENSG00000141510",
+          "uniprot": "P04637",
+          "entrez": "7157",
+          "omim": "191170"
+        }
+      },
+      {
+        "id": "HGNC:12441",
+        "type": "Gene",
+        "symbol": "TYMS",
+        "name": "thymidylate synthetase",
+        "location": "18p11.32",
+        "role": "Synthetic lethal partner to TP53",
+        "cross_references": {
+          "ensembl": "ENSG00000176890",
+          "uniprot": "P04818",
+          "entrez": "7298",
+          "omim": "188350"
+        }
+      }
+    ],
+    "compounds": [
+      {
+        "id": "CHEMBL:185",
+        "type": "Compound",
+        "name": "5-fluorouracil",
+        "synonyms": ["5-FU", "Fluorouracil", "Adrucil"],
+        "max_phase": 4,
+        "mechanism": "Thymidylate synthase inhibitor",
+        "molecular_weight": 130.08
+      },
+      {
+        "id": "CHEMBL:225072",
+        "type": "Compound",
+        "name": "Pemetrexed",
+        "synonyms": ["Alimta", "LY-231514"],
+        "max_phase": 4,
+        "mechanism": "Thymidylate synthase inhibitor",
+        "molecular_weight": 427.42
+      }
+    ],
+    "clinical_trials": [
+      {
+        "id": "NCT:04695925",
+        "type": "ClinicalTrial",
+        "nct_id": "NCT04695925",
+        "title": "Osimertinib Monotherapy or Combination With Chemotherapy for Advanced NSCLC Concurrent EGFR and TP53 Mutations",
+        "status": "ACTIVE_NOT_RECRUITING",
+        "phase": "PHASE3",
+        "conditions": ["Non-small Cell Carcinoma", "EGFR Gene Mutation"]
+      }
+    ]
+  },
+  "edges": [
+    {
+      "source": "HGNC:11998",
+      "target": "HGNC:12441",
+      "type": "SYNTHETIC_LETHAL",
+      "evidence": "Feng et al. 2022",
+      "evidence_type": "CRISPR screen",
+      "validation": {
+        "biogrid_orcs_screens": 352,
+        "cell_lines_validated": ["HCT 116", "HeLa"],
+        "assay_type": "CRISPRn knockout"
+      }
+    },
+    {
+      "source": "CHEMBL:185",
+      "target": "HGNC:12441",
+      "type": "INHIBITOR",
+      "mechanism": "Thymidylate synthase inhibition",
+      "action_type": "INHIBITOR",
+      "direct_interaction": true,
+      "max_phase": 4
+    },
+    {
+      "source": "CHEMBL:225072",
+      "target": "HGNC:12441",
+      "type": "INHIBITOR",
+      "mechanism": "Thymidylate synthase inhibition",
+      "action_type": "INHIBITOR",
+      "direct_interaction": true,
+      "max_phase": 4
+    },
+    {
+      "source": "CHEMBL:225072",
+      "target": "NCT:04695925",
+      "type": "IN_TRIAL",
+      "role": "combination therapy agent"
+    }
+  ],
+  "disease_associations": [
+    {
+      "target_id": "ENSG00000141510",
+      "disease": "Li-Fraumeni syndrome",
+      "disease_id": "MONDO_0018875",
+      "score": 0.876
+    },
+    {
+      "target_id": "ENSG00000141510",
+      "disease": "colorectal cancer",
+      "disease_id": "MONDO_0005575",
+      "score": 0.736
+    },
+    {
+      "target_id": "ENSG00000141510",
+      "disease": "lung adenocarcinoma",
+      "disease_id": "EFO_0000571",
+      "score": 0.729
+    }
+  ],
+  "validation_summary": {
+    "gold_standard_path_verified": true,
+    "path": "Gene(TP53) --[synthetic_lethal_with]--> Gene(TYMS) --[target_of]--> Drug(Pemetrexed) --[in_trial]--> Trial(NCT04695925)",
+    "tyms_essentiality": {
+      "total_screens_essential": 352,
+      "validation_status": "CONFIRMED"
+    },
+    "skills_used": [
+      "lifesciences-genomics",
+      "lifesciences-proteomics",
+      "lifesciences-crispr",
+      "lifesciences-pharmacology",
+      "lifesciences-clinical",
+      "lifesciences-graph-builder"
+    ]
+  }
+}

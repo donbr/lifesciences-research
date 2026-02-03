@@ -1,0 +1,16 @@
+CQ,Title,CURIEs_Count,API_Tools_Count,Confidence_Scores_Count,Quality_Rating,Primary_Domain,API_Tool_List,CURIE_Types,Confidence_Scores_List
+CQ-1,Palovarotene Mechanism for FOP,4,7,2,HIGH,Drug Target,chembl_search_compounds; chembl_get_compound; hgnc_search_genes; hgnc_get_gene; opentargets_get_associations; curl(STRING); curl(ChEMBL Mechanism),CHEMBL; HGNC; MONDO,0.816; 0.435
+CQ-2,FOP Drug Repurposing via BMP,9,7,0,MEDIUM,Drug Repurposing,hgnc_get_gene; hgnc_search_genes; wikipathways_search_pathways; wikipathways_get_pathway_components; chembl_search_compounds; chembl_get_compound; curl(ChEMBL),HGNC; CHEMBL; WP,None
+CQ-3,Alzheimer's Gene-Protein Network,11,5,7,HIGH,Gene Network,hgnc_search_genes; hgnc_get_gene; string_search_proteins; string_get_interactions; opentargets_get_associations,HGNC,0.999; 0.999; 0.999; 0.991; 0.956; 0.961; 0.786
+CQ-4,Alzheimer's Disease Therapeutics,10,6,0,MEDIUM,Drug Discovery,hgnc_search_genes; hgnc_get_gene; chembl_search_compounds; chembl_get_compound; curl(ChEMBL); curl(ClinicalTrials),HGNC; CHEMBL; MONDO; NCT,None
+CQ-5,MAPK Regulatory Cascade,8,5,2,HIGH,Signaling Pathway,hgnc_search_genes; hgnc_get_gene; string_search_proteins; string_get_interactions; wikipathways_search_pathways,HGNC; WP,0.999; 0.999
+CQ-6,BRCA1 Regulatory Network,9,5,6,HIGH,Regulatory Network,hgnc_search_genes; hgnc_get_gene; string_search_proteins; string_get_interactions; curl(STRING multi-protein),HGNC,0.879; 0.665; 0.999; 0.999; 0.998; 0.949
+CQ-7,NGLY1 Deficiency Drug Repurposing,6,7,2,HIGH,Protein Complex,hgnc_search_genes; hgnc_get_gene; string_search_proteins; string_get_interactions; opentargets_get_associations; chembl_search_compounds; chembl_get_compound,HGNC; CHEMBL; MONDO,0.905; 0.999
+CQ-8,ARID1A Synthetic Lethality,10,7,0,MEDIUM,Synthetic Lethality,hgnc_search_genes; hgnc_get_gene; string_search_proteins; string_get_interactions; chembl_search_compounds; chembl_get_compound; curl(ClinicalTrials),HGNC; CHEMBL; NCT,None
+CQ-9,Dasatinib Off-Target Safety,6,5,0,MEDIUM,Drug Safety,chembl_search_compounds; chembl_get_compound; curl(ChEMBL); hgnc_search_genes; hgnc_get_gene,CHEMBL; HGNC,None
+CQ-10,Huntington's Disease Novel Targets,6,6,5,HIGH,Disease Pathway,hgnc_search_genes; hgnc_get_gene; string_search_proteins; string_get_interactions; opentargets_get_associations; curl(ClinicalTrials),HGNC; MONDO,0.999; 0.997; 0.995; 0.991; 0.989
+CQ-11,p53-MDM2-Nutlin Axis,6,7,3,HIGH,Therapeutic Axis,hgnc_search_genes; hgnc_get_gene; string_search_proteins; string_get_interactions; chembl_search_compounds; chembl_get_compound; curl(ChEMBL),HGNC; CHEMBL; UniProt,0.999; 0.999; 0.999
+CQ-12,Health Emergencies Clinical Trial Landscape,11,1,0,LOW,Clinical Trials,curl(ClinicalTrials),NCT,None
+CQ-13,High-Commercialization Phase 3 Trials,5,3,0,MEDIUM,Clinical Trials,curl(ClinicalTrials); chembl_search_compounds; chembl_get_compound,CHEMBL; NCT,None
+CQ-14,Feng Synthetic Lethality Validation,4,5,0,MEDIUM,Synthetic Lethality,hgnc_search_genes; hgnc_get_gene; chembl_search_compounds; chembl_get_compound; curl(BioGRID),HGNC; CHEMBL,None
+CQ-15,CAR-T Regulatory Landscape,5,4,0,MEDIUM,Cell Therapy,curl(ClinicalTrials); chembl_search_compounds; chembl_get_compound; hgnc_search_genes,CHEMBL; HGNC; NCT,None
