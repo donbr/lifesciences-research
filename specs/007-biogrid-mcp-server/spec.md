@@ -1,11 +1,11 @@
 # Feature Specification: BioGRID MCP Server
 
-**Feature Branch**: `feature/006-string-007-biogrid`
+**Feature Branch**: `feature/biogrid-search-api-validation`
 **Created**: 2025-12-23
-**Status**: Scaffolded (pending integration tests)
-**Updated**: 2025-12-23
+**Status**: ✅ Complete (13 integration tests passing, all 4 User Stories + Principle IV)
+**Updated**: 2026-02-06
 **Linear**: AGE-75
-**Input**: User description: "Build the BioGRID MCP Server for genetic and protein interaction data"
+**Input**: User description: "Update BioGRID search_genes to query BioGRID /interactions endpoint with format=count for lightweight gene existence verification, replacing client-side-only regex validation. Full compliance with Constitution Principle II (Fuzzy-to-Fact)."
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -19,10 +19,11 @@ As a genetics researcher, I need to validate gene symbols for BioGRID interactio
 
 **Acceptance Scenarios**:
 
-1. **Given** a researcher knows a gene symbol, **When** they search for "TP53", **Then** the system returns a validated candidate with organism information
-2. **Given** a researcher enters a partial symbol, **When** they search with minimum 2 characters, **Then** the system validates the symbol format
+1. **Given** a researcher knows a gene symbol, **When** they search for "TP53", **Then** the system queries BioGRID to confirm the gene exists and returns a candidate with interaction_count and organism information
+2. **Given** a researcher enters a partial symbol, **When** they search with minimum 2 characters, **Then** the system validates format locally then confirms existence via BioGRID API
 3. **Given** a researcher wants human genes only, **When** they specify organism=9606, **Then** results are filtered to Homo sapiens
 4. **Given** a researcher provides invalid input, **When** they search with 1 character, **Then** the system returns error code AMBIGUOUS_QUERY with recovery hint
+5. **Given** a researcher searches for a nonexistent gene, **When** they search for "ZZZZZ99", **Then** the system returns error code ENTITY_NOT_FOUND with recovery hint
 
 ---
 
@@ -95,7 +96,7 @@ As a genetics researcher, when I encounter errors during BioGRID queries (rate l
 
 **Fuzzy-to-Fact Protocol**
 
-- **FR-005**: System MUST implement `search_genes(query)` tool validating gene symbols for BioGRID (ADR-001 Section 3)
+- **FR-005**: System MUST implement `search_genes(query)` tool that queries BioGRID API to confirm gene exists in database (ADR-001 Section 3, Constitution Principle II)
 - **FR-006**: System MUST implement `get_interactions(gene_symbol)` tool accepting validated gene symbols (ADR-001 Section 3)
 - **FR-007**: Gene symbols are case-insensitive and normalized to uppercase
 
@@ -109,6 +110,15 @@ As a genetics researcher, when I encounter errors during BioGRID queries (rate l
   - pubmed_id: Literature reference (optional)
   - throughput: "High Throughput" or "Low Throughput" (optional)
 - **FR-009**: Response MUST include counts of physical vs genetic interactions
+
+**Token Budgeting**
+
+- **FR-013**: `get_interactions` MUST support `slim=True` parameter (Constitution Principle IV)
+  - Default (False): Full interaction records with all fields (~100 tokens/interaction)
+  - Slim (True): Minimal fields only: symbol_b, experimental_system_type (~15 tokens/interaction)
+  - `InteractionResult` MUST implement `to_slim()` method returning reduced dict
+- **FR-014**: `search_genes` MUST accept `slim` parameter for API consistency (Constitution Principle IV)
+  - BioGridSearchCandidate is already minimal (~30 tokens); slim mode returns same fields
 
 **Envelopes & Schema**
 
@@ -164,20 +174,23 @@ As a genetics researcher, when I encounter errors during BioGRID queries (rate l
 
 ## Test Coverage
 
-| Test | Status | Description |
-|------|--------|-------------|
-| test_search_genes_tp53 | PENDING | Gene symbol validation |
-| test_search_genes_validation | PENDING | Query validation errors |
-| test_get_interactions_tp53 | PENDING | Interactions for TP53 |
-| test_get_interactions_evidence | PENDING | Experimental system types |
-| test_get_interactions_counts | PENDING | Physical vs genetic counts |
-| test_get_interactions_limit | PENDING | max_results parameter |
-| test_get_interactions_validation | PENDING | Gene symbol validation |
-| test_api_key_missing | PENDING | Missing API key error |
-| test_api_key_invalid | PENDING | Invalid API key error |
-| test_error_recovery | PENDING | Error envelope format |
+| Test | Status | Description | Task |
+|------|--------|-------------|------|
+| test_search_genes_tp53 | ✅ PASS | API-backed gene search for TP53, interaction_count > 0 | T010 |
+| test_search_genes_validation | ✅ PASS | Symbol format validation + API confirmation | T011 |
+| test_search_genes_nonexistent | ✅ PASS | ENTITY_NOT_FOUND for gene not in BioGRID (ZZZZZ99) | T011 |
+| test_get_interactions_slim | ✅ PASS | slim=True returns minimal fields (Principle IV) | T074 |
+| test_get_interactions_tp53 | ✅ PASS | Interactions with MDM2/ATM partners | T022 |
+| test_get_interactions_evidence | ✅ PASS | Experimental system types (physical/genetic) | T023 |
+| test_get_interactions_counts | ✅ PASS | physical_count + genetic_count == total_count | T024 |
+| test_get_interactions_limit | ✅ PASS | max_results parameter capping | T025 |
+| test_get_interactions_validation | ✅ PASS | Gene symbol validation in get_interactions | T026 |
+| test_cross_references_entrez | ✅ PASS | Entrez Gene ID 7157 for TP53, omit-if-null | T043 |
+| test_error_recovery_invalid_api_key | ✅ PASS | UPSTREAM_ERROR with recovery hint | T048 |
+| test_error_recovery_ambiguous_query | ✅ PASS | AMBIGUOUS_QUERY with recovery hints | T049 |
+| test_error_recovery_entity_not_found | ✅ PASS | ENTITY_NOT_FOUND for nonexistent gene | T050 |
 
-**Total: 0/10 integration tests (scaffolded, pending BIOGRID_API_KEY configuration)**
+**Total: 13/13 integration tests passing (all 4 User Stories + Principle IV slim mode verified)**
 
 ## Dependencies
 

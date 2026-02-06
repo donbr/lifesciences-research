@@ -4,6 +4,8 @@ This server exposes BioGRID API functionality via FastMCP protocol,
 following ADR-001 Agentic Biolink schema and Fuzzy-to-Fact workflow.
 """
 
+from typing import Any
+
 from fastmcp import FastMCP
 
 from lifesciences_mcp.clients.biogrid import BioGridClient
@@ -30,30 +32,36 @@ def get_client() -> BioGridClient:
 
 @mcp.tool()
 async def search_genes(
-    query: str, organism: int = 9606
+    query: str, organism: int = 9606, slim: bool = False
 ) -> PaginationEnvelope[BioGridSearchCandidate] | ErrorEnvelope:
-    """Validate gene symbol for BioGRID interaction queries (Fuzzy Phase 1).
+    """Search for a gene in BioGRID and confirm it exists (Fuzzy Phase 1).
 
-    This tool validates gene symbol format and normalizes to uppercase.
-    Use the validated symbol in get_interactions tool for strict lookup.
+    Queries BioGRID to confirm the gene exists in the database and returns
+    the interaction count. Use the confirmed symbol in get_interactions for
+    strict lookup.
 
     Args:
-        query: Gene symbol to validate (e.g., "TP53", "brca1")
+        query: Gene symbol to search (e.g., "TP53", "brca1")
         organism: NCBI Taxonomy ID (default: 9606 for Homo sapiens)
+        slim: Token budgeting (Constitution Principle IV). No behavior change
+            since search candidates are already minimal (~30 tokens).
 
     Returns:
-        PaginationEnvelope with validated gene symbol or ErrorEnvelope on error
+        PaginationEnvelope with confirmed gene and interaction_count, or ErrorEnvelope
 
     Examples:
-        >>> search_genes("TP53")  # Valid gene
-        >>> search_genes("brca1")  # Will be normalized to "BRCA1"
-        >>> search_genes("X")  # Error: too short
+        >>> search_genes("TP53")  # Confirmed in BioGRID with interaction count
+        >>> search_genes("brca1")  # Normalized to "BRCA1", confirmed via API
+        >>> search_genes("ZZZZZ99")  # ENTITY_NOT_FOUND: gene not in BioGRID
 
     Error Codes:
         - AMBIGUOUS_QUERY: Query too short or invalid format
+        - ENTITY_NOT_FOUND: Gene not found in BioGRID database
+        - UPSTREAM_ERROR: BioGRID API error (invalid key, timeout, etc.)
+        - RATE_LIMITED: Rate limit exceeded (2 req/sec)
     """
     client = get_client()
-    return await client.search_genes(query, organism)
+    return await client.search_genes(query, organism, slim=slim)
 
 
 @mcp.tool()
@@ -62,7 +70,8 @@ async def get_interactions(
     organism: int = 9606,
     max_results: int = 10000,
     include_interspecies: bool = False,
-) -> InteractionResult | ErrorEnvelope:
+    slim: bool = False,
+) -> InteractionResult | dict[str, Any] | ErrorEnvelope:
     """Get genetic/protein interactions for a validated gene symbol (Strict Phase 2).
 
     Retrieves experimentally validated interactions from BioGRID with evidence types.
@@ -73,14 +82,17 @@ async def get_interactions(
         organism: NCBI Taxonomy ID (default: 9606 for Homo sapiens)
         max_results: Max interactions to return (default/max: 10000)
         include_interspecies: Include interspecies interactions (default: False)
+        slim: Token budgeting (Constitution Principle IV). When True, returns
+            minimal fields (~15 tokens/interaction): symbol_b and
+            experimental_system_type only, plus counts. Default: False.
 
     Returns:
-        InteractionResult with interaction network or ErrorEnvelope on error
+        InteractionResult (full), slim dict, or ErrorEnvelope on error
 
     Examples:
-        >>> get_interactions("TP53")  # Get TP53 interactions
+        >>> get_interactions("TP53")  # Full interaction records
+        >>> get_interactions("TP53", slim=True)  # Minimal fields for token budgeting
         >>> get_interactions("MDM2", max_results=100)  # Limit results
-        >>> get_interactions("TP53", include_interspecies=True)  # Include cross-species
 
     Error Codes:
         - AMBIGUOUS_QUERY: Invalid gene symbol format
@@ -89,8 +101,11 @@ async def get_interactions(
         - RATE_LIMITED: Rate limit exceeded (2 req/sec)
 
     Note:
-        Interactions include experimental_system (e.g., "Affinity Capture-Western"),
+        Full mode includes experimental_system (e.g., "Affinity Capture-Western"),
         experimental_system_type ("physical" or "genetic"), PubMed ID, and throughput.
+        Slim mode returns only symbol_b and experimental_system_type per interaction.
     """
     client = get_client()
-    return await client.get_interactions(gene_symbol, organism, max_results, include_interspecies)
+    return await client.get_interactions(
+        gene_symbol, organism, max_results, include_interspecies, slim=slim
+    )

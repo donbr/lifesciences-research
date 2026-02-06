@@ -7,6 +7,7 @@ and error handling following ADR-001 async-first architecture.
 import asyncio
 import os
 import time
+from typing import Any
 
 import httpx
 
@@ -118,18 +119,23 @@ class BioGridClient(LifeSciencesClient):
         return response
 
     async def search_genes(
-        self, query: str, organism: int = 9606
+        self, query: str, organism: int = 9606, *, slim: bool = False
     ) -> PaginationEnvelope[BioGridSearchCandidate] | ErrorEnvelope:
-        """Validate gene symbol for BioGRID queries (Fuzzy Phase 1).
+        """Search for a gene in BioGRID using lightweight count query (Fuzzy Phase 1).
+
+        Queries the BioGRID /interactions endpoint with format=count to confirm
+        the gene exists in the database without fetching full interaction data.
 
         Args:
-            query: Gene symbol to validate
+            query: Gene symbol to search (e.g., "TP53", "brca1")
             organism: NCBI Taxonomy ID (default: 9606 for Homo sapiens)
+            slim: Token budgeting (Constitution Principle IV). No effect on
+                search_genes since candidates are already minimal (~30 tokens).
 
         Returns:
-            PaginationEnvelope with validated gene or ErrorEnvelope on error
+            PaginationEnvelope with confirmed gene or ErrorEnvelope on error
         """
-        # Validation: query too short
+        # Fail-fast: query too short
         if len(query) < 2:
             return ErrorEnvelope(
                 error=ErrorDetail(
@@ -143,34 +149,108 @@ class BioGridClient(LifeSciencesClient):
         # Normalize to uppercase
         symbol = query.upper()
 
-        # Validate format
+        # Fail-fast: invalid format (prevents unnecessary API call)
         if not GENE_SYMBOL_PATTERN.match(symbol):
             return ErrorEnvelope(
                 error=ErrorDetail(
                     code=ErrorCode.AMBIGUOUS_QUERY,
                     message=f"Invalid gene symbol format: {symbol}",
-                    recovery_hint="Gene symbols must be 1-15 characters, alphanumeric with hyphens allowed",
+                    recovery_hint="Gene symbols must be alphanumeric with hyphens allowed",
                     invalid_input=query,
                 )
             )
 
-        # Create candidate (validation phase - actual BioGRID query happens in get_interactions)
-        organism_names = {
-            9606: "Homo sapiens",
-            10090: "Mus musculus",
-            7227: "Drosophila melanogaster",
-        }
-        candidate = BioGridSearchCandidate(
-            symbol=symbol,
-            organism=organism_names.get(organism, f"Organism {organism}"),
-            taxon_id=organism,
-            is_valid=True,
-        )
+        # Query BioGRID API with format=count for lightweight existence check
+        try:
+            url = f"{self.BASE_URL}/interactions/"
+            params = {
+                "geneList": symbol,
+                "taxId": organism,
+                "searchNames": "true",
+                "format": "count",
+            }
 
-        return PaginationEnvelope(
-            items=[candidate],
-            pagination=Pagination(cursor=None, total_count=1, page_size=1),
-        )
+            response = await self._rate_limited_get(url, params)
+
+            # Handle rate limiting / server errors after retries
+            if response.status_code == 429:
+                return ErrorEnvelope(
+                    error=ErrorDetail(
+                        code=ErrorCode.RATE_LIMITED,
+                        message="BioGRID API rate limit exceeded after retries",
+                        recovery_hint="Wait 1 second before retrying. Rate limit: 2 req/sec",
+                        invalid_input=query,
+                    )
+                )
+            if response.status_code == 503:
+                return ErrorEnvelope(
+                    error=ErrorDetail(
+                        code=ErrorCode.UPSTREAM_ERROR,
+                        message="BioGRID API temporarily unavailable after retries",
+                        recovery_hint="Service is overloaded. Wait and retry in 30 seconds",
+                        invalid_input=query,
+                    )
+                )
+            response.raise_for_status()
+
+            # format=count returns a single integer as text
+            count = int(response.text.strip())
+
+            if count == 0:
+                return ErrorEnvelope(
+                    error=ErrorDetail(
+                        code=ErrorCode.ENTITY_NOT_FOUND,
+                        message=f"Gene not found in BioGRID: {symbol}",
+                        recovery_hint="Verify gene symbol is correct. Use HGNC search_genes for official symbol resolution.",
+                        invalid_input=query,
+                    )
+                )
+
+            # Gene confirmed in BioGRID
+            organism_names = {
+                9606: "Homo sapiens",
+                10090: "Mus musculus",
+                7227: "Drosophila melanogaster",
+            }
+            candidate = BioGridSearchCandidate(
+                symbol=symbol,
+                organism=organism_names.get(organism, f"Organism {organism}"),
+                taxon_id=organism,
+                interaction_count=count,
+            )
+
+            return PaginationEnvelope(
+                items=[candidate],
+                pagination=Pagination(cursor=None, total_count=1, page_size=1),
+            )
+
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 401:
+                return ErrorEnvelope(
+                    error=ErrorDetail(
+                        code=ErrorCode.UPSTREAM_ERROR,
+                        message="BioGRID API authentication failed",
+                        recovery_hint="Check BIOGRID_API_KEY is valid. Get free key at https://webservice.thebiogrid.org/",
+                        invalid_input=query,
+                    )
+                )
+            return ErrorEnvelope(
+                error=ErrorDetail(
+                    code=ErrorCode.UPSTREAM_ERROR,
+                    message=f"BioGRID API error: {e.response.status_code}",
+                    recovery_hint="Check BioGRID API status or try again later",
+                    invalid_input=query,
+                )
+            )
+        except Exception as e:
+            return ErrorEnvelope(
+                error=ErrorDetail(
+                    code=ErrorCode.UPSTREAM_ERROR,
+                    message=f"Unexpected error: {e!r}",
+                    recovery_hint="Check network connection and BioGRID API status",
+                    invalid_input=query,
+                )
+            )
 
     async def get_interactions(
         self,
@@ -178,7 +258,9 @@ class BioGridClient(LifeSciencesClient):
         organism: int = 9606,
         max_results: int = 10000,
         include_interspecies: bool = False,
-    ) -> InteractionResult | ErrorEnvelope:
+        *,
+        slim: bool = False,
+    ) -> InteractionResult | dict[str, Any] | ErrorEnvelope:
         """Get genetic/protein interactions for a gene symbol (Strict Phase 2).
 
         Args:
@@ -186,9 +268,12 @@ class BioGridClient(LifeSciencesClient):
             organism: NCBI Taxonomy ID (default: 9606)
             max_results: Max interactions to return (default/max: 10000)
             include_interspecies: Include interspecies interactions (default: False)
+            slim: Token budgeting (Constitution Principle IV). When True, returns
+                minimal fields (~15 tokens/interaction): symbol_b and
+                experimental_system_type only, plus counts.
 
         Returns:
-            InteractionResult with interactions or ErrorEnvelope on error
+            InteractionResult (full), slim dict, or ErrorEnvelope on error
         """
         # Normalize and validate
         symbol = gene_symbol.upper()
@@ -288,7 +373,7 @@ class BioGridClient(LifeSciencesClient):
                 entrez=str(entrez_gene_a) if entrez_gene_a else None
             )
 
-            return InteractionResult(
+            result = InteractionResult(
                 query_gene=symbol,
                 interactions=interactions,
                 cross_references=cross_refs,
@@ -296,6 +381,11 @@ class BioGridClient(LifeSciencesClient):
                 genetic_count=genetic_count,
                 total_count=len(interactions),
             )
+
+            if slim:
+                return result.to_slim()
+
+            return result
 
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 401:

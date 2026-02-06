@@ -31,19 +31,19 @@ InteractionResult          # Complete interaction response
 
 ### BioGridSearchCandidate
 
-**Purpose**: Result from gene symbol validation (Fuzzy Phase 1)
+**Purpose**: Gene search result confirmed to exist in BioGRID (Fuzzy Phase 1)
 
-**Usage**: `search_genes` tool returns ranked candidates
+**Usage**: `search_genes` tool returns confirmed candidates with interaction count
 
 **Fields**:
 ```python
 class BioGridSearchCandidate(BaseModel):
-    """Gene symbol validation result for BioGRID queries."""
+    """Gene search result confirmed to exist in BioGRID."""
 
     symbol: str
     # Gene symbol (uppercase normalized)
     # Example: "TP53"
-    # Validation: ^[A-Z0-9][A-Z0-9\-]{0,14}$
+    # Validation: ^[A-Z0-9][A-Z0-9\-_@.]{0,29}$
 
     organism: str
     # Organism name
@@ -53,15 +53,16 @@ class BioGridSearchCandidate(BaseModel):
     # NCBI Taxonomy ID
     # Example: 9606
 
-    is_valid: bool
-    # Whether symbol passed validation
-    # Example: True
+    interaction_count: int
+    # Total interactions in BioGRID for this gene
+    # Example: 14523
+    # Confirmed via API (format=count)
 ```
 
 **Validation Rules**:
-- `symbol`: Must match `^[A-Z0-9][A-Z0-9\-]{0,14}$` (1-15 chars, alphanumeric + hyphen)
+- `symbol`: Must match gene symbol pattern (alphanumeric + hyphens/underscores)
 - `taxon_id`: Must be positive integer
-- `is_valid`: Derived from regex validation + BioGRID query
+- `interaction_count`: Must be >= 0 (presence in results implies count > 0)
 
 **Example**:
 ```json
@@ -69,7 +70,7 @@ class BioGridSearchCandidate(BaseModel):
   "symbol": "TP53",
   "organism": "Homo sapiens",
   "taxon_id": 9606,
-  "is_valid": true
+  "interaction_count": 14523
 }
 ```
 
@@ -276,6 +277,49 @@ class InteractionResult(BaseModel):
 }
 ```
 
+## Slim Mode (Constitution Principle IV)
+
+### InteractionResult.to_slim()
+
+**Purpose**: Token-budgeted output for context-constrained agents
+
+**Returns**: Reduced dict with only essential fields (~15 tokens/interaction vs ~100 full)
+
+```python
+def to_slim(self) -> dict[str, Any]:
+    """Return slim representation with minimal fields."""
+    return {
+        "query_gene": self.query_gene,
+        "interactions": [
+            {
+                "symbol_b": i.symbol_b,
+                "experimental_system_type": i.experimental_system_type,
+            }
+            for i in self.interactions
+        ],
+        "physical_count": self.physical_count,
+        "genetic_count": self.genetic_count,
+        "total_count": self.total_count,
+    }
+```
+
+**Example (slim=True)**:
+```json
+{
+  "query_gene": "TP53",
+  "interactions": [
+    {"symbol_b": "MDM2", "experimental_system_type": "physical"},
+    {"symbol_b": "ATM", "experimental_system_type": "physical"},
+    {"symbol_b": "BRCA1", "experimental_system_type": "genetic"}
+  ],
+  "physical_count": 2,
+  "genetic_count": 1,
+  "total_count": 3
+}
+```
+
+**Token savings**: ~85% reduction for large interaction networks (e.g., TP53 with 1000+ interactions)
+
 ## Envelopes
 
 ### PaginationEnvelope (for search_genes)
@@ -302,7 +346,7 @@ class InteractionResult(BaseModel):
       "symbol": "TP53",
       "organism": "Homo sapiens",
       "taxon_id": 9606,
-      "is_valid": true
+      "interaction_count": 14523
     }
   ],
   "pagination": {

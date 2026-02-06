@@ -49,7 +49,7 @@ class TestBioGridClientIntegration:
     # ========================================================================
 
     async def test_search_genes_tp53(self, client: BioGridClient):
-        """Test gene symbol validation for TP53 (T010)."""
+        """Test API-backed gene search for TP53 (T010)."""
         result = await client.search_genes("TP53")
 
         assert isinstance(result, PaginationEnvelope)
@@ -60,27 +60,61 @@ class TestBioGridClientIntegration:
         assert candidate.symbol == "TP53"
         assert candidate.organism == "Homo sapiens"
         assert candidate.taxon_id == 9606
-        assert candidate.is_valid is True
+        assert candidate.interaction_count > 0
 
     async def test_search_genes_validation(self, client: BioGridClient):
-        """Test gene symbol format validation (T011)."""
-        # Test valid symbols
+        """Test gene symbol format validation and API confirmation (T011)."""
+        # Test valid symbols confirmed by BioGRID API
         valid_symbols = ["TP53", "brca1", "MDM2", "ATM"]
         for symbol in valid_symbols:
             result = await client.search_genes(symbol)
             assert isinstance(result, PaginationEnvelope)
-            assert result.items[0].is_valid is True
+            assert result.items[0].interaction_count > 0
             assert result.items[0].symbol == symbol.upper()
 
-        # Test invalid: too short
+        # Test invalid: too short (fail-fast, no API call)
         result = await client.search_genes("a")
         assert isinstance(result, ErrorEnvelope)
         assert result.error.code.value == "AMBIGUOUS_QUERY"
 
-        # Test invalid: special characters
+        # Test invalid: special characters (fail-fast, no API call)
         result = await client.search_genes("TP53!")
         assert isinstance(result, ErrorEnvelope)
         assert result.error.code.value == "AMBIGUOUS_QUERY"
+
+    async def test_search_genes_nonexistent(self, client: BioGridClient):
+        """Test ENTITY_NOT_FOUND for gene not in BioGRID."""
+        result = await client.search_genes("ZZZZZ99")
+        assert isinstance(result, ErrorEnvelope)
+        assert result.error.code.value == "ENTITY_NOT_FOUND"
+        assert "not found" in result.error.message.lower()
+        assert result.error.invalid_input == "ZZZZZ99"
+
+    async def test_get_interactions_slim(self, client: BioGridClient):
+        """Test slim=True returns minimal fields (T074, Constitution Principle IV)."""
+        result = await client.get_interactions("TP53", organism=9606, max_results=10, slim=True)
+
+        assert isinstance(result, dict)
+        assert result["query_gene"] == "TP53"
+        assert result["total_count"] == len(result["interactions"])
+        assert result["physical_count"] >= 0
+        assert result["genetic_count"] >= 0
+        assert result["total_count"] <= 10
+
+        # Slim interactions should only have symbol_b and experimental_system_type
+        interaction = result["interactions"][0]
+        assert "symbol_b" in interaction
+        assert "experimental_system_type" in interaction
+        assert interaction["experimental_system_type"] in ["physical", "genetic"]
+
+        # Full fields should NOT be present in slim mode
+        assert "biogrid_interaction_id" not in interaction
+        assert "symbol_a" not in interaction
+        assert "experimental_system" not in interaction
+        assert "pubmed_id" not in interaction
+
+        # cross_references should NOT be present at top level in slim mode
+        assert "cross_references" not in result
 
     # ========================================================================
     # User Story 2: Genetic/Protein Interactions (T022-T026)

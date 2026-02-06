@@ -60,16 +60,16 @@
 
 ### Implementation for User Story 1
 
-- [ ] T012 [P] [US1] Create BioGridSearchCandidate model in src/lifesciences_mcp/models/biogrid.py
-- [ ] T013 [US1] Implement search_genes method in BioGridClient (src/lifesciences_mcp/clients/biogrid.py)
-- [ ] T014 [US1] Add gene symbol validation regex (^[A-Z0-9][A-Z0-9\-]{0,14}$) to search_genes
+- [ ] T012 [P] [US1] Update BioGridSearchCandidate model: remove is_valid, add interaction_count field in src/lifesciences_mcp/models/biogrid.py
+- [ ] T013 [US1] Implement search_genes method in BioGridClient using `/interactions?format=count&searchNames=true` API call (src/lifesciences_mcp/clients/biogrid.py)
+- [ ] T014 [US1] Add gene symbol regex as fail-fast guard (^[A-Z0-9][A-Z0-9\-_@.]{0,29}$) before API call in search_genes
 - [ ] T015 [US1] Add uppercase normalization for gene symbols in search_genes
 - [ ] T016 [US1] Add organism parameter support (default: 9606) in search_genes
-- [ ] T017 [US1] Wrap search_genes results in PaginationEnvelope
-- [ ] T018 [US1] Add AMBIGUOUS_QUERY error for queries < 2 characters
-- [ ] T019 [US1] Implement search_genes tool in src/lifesciences_mcp/servers/biogrid.py
+- [ ] T017 [US1] Wrap search_genes results in PaginationEnvelope with interaction_count
+- [ ] T018 [US1] Add AMBIGUOUS_QUERY error for queries < 2 characters and ENTITY_NOT_FOUND for count == 0
+- [ ] T019 [US1] Implement search_genes tool in src/lifesciences_mcp/servers/biogrid.py with updated docstring
 - [ ] T020 [US1] Add tool description and parameter documentation for search_genes
-- [ ] T021 [US1] Verify search_genes integration tests pass (T010, T011)
+- [ ] T021 [US1] Verify search_genes integration tests pass (T010, T011, nonexistent gene test)
 
 **Checkpoint**: At this point, User Story 1 should be fully functional and testable independently
 
@@ -159,7 +159,21 @@
 
 ---
 
-## Phase 7: Polish & Cross-Cutting Concerns
+## Phase 7A: Token Budgeting - slim=True Support (Constitution Principle IV)
+
+**Purpose**: Add `slim=True` parameter to both tools per Constitution Principle IV
+
+- [ ] T069 [P] Add `to_slim()` method to InteractionResult in src/lifesciences_mcp/models/biogrid.py (returns symbol_b + experimental_system_type per interaction, plus counts)
+- [ ] T070 Add `slim: bool = False` parameter to `get_interactions` method in src/lifesciences_mcp/clients/biogrid.py; call `to_slim()` when slim=True
+- [ ] T071 Add `slim: bool = False` parameter to `get_interactions` tool in src/lifesciences_mcp/servers/biogrid.py
+- [ ] T072 Add `slim: bool = False` parameter to `search_genes` tool in src/lifesciences_mcp/servers/biogrid.py (API consistency; no behavior change since candidates are already minimal)
+- [ ] T073 Add `slim: bool = False` parameter to `search_genes` method in src/lifesciences_mcp/clients/biogrid.py (pass-through for consistency)
+- [ ] T074 Create integration test for slim=True on get_interactions (verify reduced fields) in tests/integration/test_biogrid_api.py
+- [ ] T075 Verify all existing integration tests still pass after slim parameter addition
+
+---
+
+## Phase 7B: Polish & Cross-Cutting Concerns
 
 **Purpose**: Improvements that affect multiple user stories
 
@@ -171,7 +185,7 @@
 - [ ] T063 [P] Verify quickstart.md workflows execute successfully (manual validation)
 - [ ] T064 [P] Run linting (uv run ruff check --fix . && uv run ruff format .)
 - [ ] T065 [P] Run type checking (uv run pyright src/lifesciences_mcp/{models,clients,servers}/biogrid.py)
-- [ ] T066 Verify all 10 integration tests pass (uv run pytest tests/integration/test_biogrid_api.py -v -m integration --ignore=tests/integration/test_biogrid_performance.py)
+- [ ] T066 Verify all 12 integration tests pass (uv run pytest tests/integration/test_biogrid_api.py -v)
 - [ ] T067 [P] Performance benchmark test validating P95 < 3 seconds for interaction queries (NFR-004) in tests/integration/test_biogrid_performance.py
 - [ ] T068 [P] Integration test validating max 10,000 interactions limit (NFR-003) in tests/integration/test_biogrid_api.py
 
@@ -297,10 +311,11 @@ With multiple developers:
 | Phase 4: User Story 2 (P2) | 21 | 7 | US2 |
 | Phase 5: User Story 3 (P3) | 5 | 1 | US3 |
 | Phase 6: User Story 4 (P4) | 10 | 3 | US4 |
-| Phase 7: Polish | 11 | 11 | N/A |
-| **TOTAL** | **68** | **32** | **4 stories** |
+| Phase 7A: Token Budgeting | 7 | 2 | N/A |
+| Phase 7B: Polish | 11 | 11 | N/A |
+| **TOTAL** | **75** | **34** | **4 stories** |
 
-**Parallel efficiency**: 47% of tasks can run in parallel (32/68)
+**Parallel efficiency**: 45% of tasks can run in parallel (34/75)
 
 **Independent test criteria**:
 - US1: Query "TP53" → Get validated gene symbol

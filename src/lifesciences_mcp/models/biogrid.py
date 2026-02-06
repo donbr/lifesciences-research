@@ -2,10 +2,14 @@
 
 This module implements Pydantic models for BioGRID API responses following
 ADR-001 Agentic Biolink schema and Constitution Principle III (Schema Determinism).
+
+Token Budget:
+- Full mode: ~100 tokens/interaction (all fields)
+- Slim mode: ~15 tokens/interaction (symbol_b + experimental_system_type only)
 """
 
 import re
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -15,12 +19,14 @@ GENE_SYMBOL_PATTERN = re.compile(r"^[A-Z0-9][A-Z0-9\-_@.]{0,29}$")
 
 
 class BioGridSearchCandidate(BaseModel):
-    """Gene symbol validation result for BioGRID queries (Fuzzy Phase 1)."""
+    """Gene search result confirmed to exist in BioGRID (Fuzzy Phase 1)."""
 
     symbol: str = Field(..., description="Gene symbol (uppercase normalized)")
     organism: str = Field(..., description="Organism name")
     taxon_id: int = Field(..., description="NCBI Taxonomy ID", gt=0)
-    is_valid: bool = Field(..., description="Whether symbol passed validation")
+    interaction_count: int = Field(
+        ..., description="Total interactions in BioGRID for this gene", ge=0
+    )
 
     @field_validator("symbol")
     @classmethod
@@ -105,3 +111,24 @@ class InteractionResult(BaseModel):
             if v != actual_count:
                 raise ValueError(f"total_count ({v}) must equal len(interactions) ({actual_count})")
         return v
+
+    def to_slim(self) -> dict[str, Any]:
+        """Return slim representation with minimal fields (~15 tokens/interaction).
+
+        Constitution Principle IV: Token budgeting for context-constrained agents.
+        Omits biogrid_interaction_id, symbol_a, experimental_system, pubmed_id,
+        throughput, organism IDs, entrez IDs, and cross_references.
+        """
+        return {
+            "query_gene": self.query_gene,
+            "interactions": [
+                {
+                    "symbol_b": i.symbol_b,
+                    "experimental_system_type": i.experimental_system_type,
+                }
+                for i in self.interactions
+            ],
+            "physical_count": self.physical_count,
+            "genetic_count": self.genetic_count,
+            "total_count": self.total_count,
+        }
