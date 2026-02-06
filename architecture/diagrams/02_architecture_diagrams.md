@@ -1456,18 +1456,18 @@ graph TB
     Custom -->|JSON-RPC 2.0| Gateway_MCP
 
     %% Gateway mounts individual servers
-    Gateway_MCP -->|mcp.mount()| Mount1
-    Gateway_MCP -->|mcp.mount()| Mount2
-    Gateway_MCP -->|mcp.mount()| Mount3
-    Gateway_MCP -->|mcp.mount()| Mount4
-    Gateway_MCP -->|mcp.mount()| Mount5
-    Gateway_MCP -->|mcp.mount()| Mount6
-    Gateway_MCP -->|mcp.mount()| Mount7
-    Gateway_MCP -->|mcp.mount()| Mount8
-    Gateway_MCP -->|mcp.mount()| Mount9
-    Gateway_MCP -->|mcp.mount()| Mount10
-    Gateway_MCP -->|mcp.mount()| Mount11
-    Gateway_MCP -->|mcp.mount()| Mount12
+    Gateway_MCP -->|"mcp.mount()"| Mount1
+    Gateway_MCP -->|"mcp.mount()"| Mount2
+    Gateway_MCP -->|"mcp.mount()"| Mount3
+    Gateway_MCP -->|"mcp.mount()"| Mount4
+    Gateway_MCP -->|"mcp.mount()"| Mount5
+    Gateway_MCP -->|"mcp.mount()"| Mount6
+    Gateway_MCP -->|"mcp.mount()"| Mount7
+    Gateway_MCP -->|"mcp.mount()"| Mount8
+    Gateway_MCP -->|"mcp.mount()"| Mount9
+    Gateway_MCP -->|"mcp.mount()"| Mount10
+    Gateway_MCP -->|"mcp.mount()"| Mount11
+    Gateway_MCP -->|"mcp.mount()"| Mount12
     Gateway_MCP -.->|excludes| Excluded
 
     %% Mounted servers reference standalone implementations
