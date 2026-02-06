@@ -13,10 +13,11 @@
   - BioGridClient extends LifeSciencesClient
 
 - [x] **Principle II: Fuzzy-to-Fact Resolution Protocol**
-  - Phase 1 (Fuzzy): `search_genes()` validates gene symbol format
-  - Phase 2 (Strict): `get_interactions()` accepts validated gene symbols
-  - Simplified workflow: symbol validation → interaction query
-  - Rationale: BioGRID uses gene symbols natively (not CURIEs)
+  - Phase 1 (Fuzzy): `search_genes()` queries BioGRID API with `format=count` to confirm gene exists
+  - Phase 2 (Strict): `get_interactions()` accepts confirmed gene symbols
+  - API-backed workflow: regex fail-fast → API existence check → interaction query
+  - ENTITY_NOT_FOUND when gene not in BioGRID (count == 0)
+  - Rationale: BioGRID API confirms gene existence via lightweight count query
 
 - [x] **Principle III: Schema Determinism**
   - PaginationEnvelope for search_genes
@@ -25,9 +26,10 @@
   - Omit keys entirely if no reference (never use null)
 
 - [x] **Principle IV: Token Budgeting**
+  - `slim=True` parameter on `get_interactions` (~15 tokens/interaction vs ~100 full)
+  - `slim=True` parameter on `search_genes` (API consistency)
+  - `InteractionResult.to_slim()` returns symbol_b + experimental_system_type per interaction
   - `max_results` parameter prevents context exhaustion
-  - Interaction records are minimal (~100 tokens each)
-  - No slim mode needed (already token-efficient)
 
 - [x] **Principle V: Specification-Before-Code**
   - Following SpecKit workflow
@@ -45,7 +47,7 @@
 
 **GATE STATUS**: ✅ PASS - All Constitution principles satisfied
 
-**Note on Fuzzy-to-Fact**: BioGRID's gene symbol validation workflow is a simplified adaptation of the full CURIE resolution protocol. This is acceptable per Constitution Principle II rationale (prevent hallucinated mappings).
+**Note on Fuzzy-to-Fact**: BioGRID's gene symbol search uses API-backed existence confirmation via `format=count`. This fully satisfies Constitution Principle II (prevent hallucinated mappings).
 
 ## ADR-001 Compliance
 
@@ -55,10 +57,10 @@
   - Context manager protocol for cleanup
 
 - [x] **§3: Fuzzy-to-Fact Protocol**
-  - Adapted workflow: symbol validation → interaction query
-  - Fuzzy: search_genes → BioGridSearchCandidate
+  - Standard workflow: API-backed gene search → interaction query
+  - Fuzzy: search_genes → BioGRID API (format=count) → BioGridSearchCandidate with interaction_count
   - Strict: get_interactions → InteractionResult
-  - ENTITY_NOT_FOUND error for genes without interactions
+  - ENTITY_NOT_FOUND error for genes not found in BioGRID
 
 - [x] **§4: Agentic Biolink Schema**
   - cross_references object with Entrez Gene ID
@@ -171,5 +173,5 @@
 - No complexity violations - straightforward implementation
 - Rate limiting is 2 req/sec (conservative estimate; BioGRID documentation unclear)
 - Cross-references include only Entrez Gene ID (minimal but sufficient)
-- Gene symbol validation is simpler than full CURIE resolution but still prevents hallucinated queries
+- Gene symbol search uses API-backed confirmation (format=count) to prevent hallucinated queries
 - Implementation pending BIOGRID_API_KEY configuration for integration tests

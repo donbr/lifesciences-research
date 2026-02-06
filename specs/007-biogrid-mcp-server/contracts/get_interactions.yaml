@@ -53,6 +53,18 @@ inputs:
       Whether to include cross-species interactions.
       Default: false (same-species only)
 
+  slim:
+    type: boolean
+    required: false
+    default: false
+    description: |
+      Token budgeting parameter (Constitution Principle IV).
+      When true, returns minimal interaction fields (~15 tokens/interaction):
+        - symbol_b, experimental_system_type only per interaction
+        - Omits: biogrid_interaction_id, symbol_a, experimental_system,
+          pubmed_id, throughput, organism IDs, entrez IDs, cross_references
+      When false (default), returns full records (~100 tokens/interaction).
+
 output:
   type: InteractionResult
   description: Complete interaction network with counts

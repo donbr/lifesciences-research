@@ -1,0 +1,1352 @@
+{
+  "info": {
+    "name": "LifeSciences MCP Clients",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Requests derived from lifesciences_mcp/clients in donbr/lifesciences-research. Set API keys and base URLs via collection variables as needed."
+  },
+  "variable": [
+    {
+      "key": "biogrid_base_url",
+      "value": "https://webservice.thebiogrid.org"
+    },
+    {
+      "key": "biogrid_api_key",
+      "value": ""
+    },
+    {
+      "key": "clinicaltrials_base_url",
+      "value": "https://clinicaltrials.gov/api/v2"
+    },
+    {
+      "key": "drugbank_public_base_url",
+      "value": "https://go.drugbank.com"
+    },
+    {
+      "key": "drugbank_commercial_base_url",
+      "value": "https://api.drugbank.com/v1"
+    },
+    {
+      "key": "drugbank_base_url",
+      "value": "https://go.drugbank.com"
+    },
+    {
+      "key": "drugbank_api_key",
+      "value": ""
+    },
+    {
+      "key": "ensembl_base_url",
+      "value": "https://rest.ensembl.org"
+    },
+    {
+      "key": "entrez_base_url",
+      "value": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
+    },
+    {
+      "key": "ncbi_api_key",
+      "value": ""
+    },
+    {
+      "key": "hgnc_base_url",
+      "value": "https://rest.genenames.org"
+    },
+    {
+      "key": "iuphar_base_url",
+      "value": "https://www.guidetopharmacology.org/services"
+    },
+    {
+      "key": "opentargets_graphql_url",
+      "value": "https://api.platform.opentargets.org/api/v4/graphql"
+    },
+    {
+      "key": "pubchem_base_url",
+      "value": "https://pubchem.ncbi.nlm.nih.gov/rest/pug"
+    },
+    {
+      "key": "string_base_url",
+      "value": "https://string-db.org/api"
+    },
+    {
+      "key": "uniprot_base_url",
+      "value": "https://rest.uniprot.org"
+    },
+    {
+      "key": "wikipathways_base_url",
+      "value": "http://webservice.wikipathways.org"
+    },
+    {
+      "key": "wikipathways_json_base_url",
+      "value": "https://www.wikipathways.org/json"
+    }
+  ],
+  "item": [
+    {
+      "name": "BioGRID",
+      "item": [
+        {
+          "name": "search_genes",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{biogrid_base_url}}/interactions/?geneList={{query}}&taxId={{organism}}&searchNames=true&format=count&accesskey={{biogrid_api_key}}",
+              "host": [
+                "{{biogrid_base_url}}"
+              ],
+              "path": [
+                "interactions",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "geneList",
+                  "value": "{{query}}",
+                  "description": "Gene symbol to search (e.g. BRCA1). Normalized to uppercase."
+                },
+                {
+                  "key": "taxId",
+                  "value": "{{organism}}",
+                  "description": "NCBI Taxonomy ID (default: 9606 for Homo sapiens)"
+                },
+                {
+                  "key": "searchNames",
+                  "value": "true",
+                  "description": "Match gene names and synonyms"
+                },
+                {
+                  "key": "format",
+                  "value": "count",
+                  "description": "Returns single integer count (lightweight existence check)"
+                },
+                {
+                  "key": "accesskey",
+                  "value": "{{biogrid_api_key}}"
+                }
+              ]
+            },
+            "description": "Maps to BioGridClient.search_genes in biogrid.py. API-BACKED SEARCH — queries BioGRID /interactions with format=count for lightweight gene existence verification (~200ms). Returns interaction count; count=0 triggers ENTITY_NOT_FOUND. Client-side regex serves as fail-fast guard only. Parameters: query (gene symbol), organism (NCBI taxon ID, default 9606)."
+          }
+        },
+        {
+          "name": "get_interactions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{biogrid_base_url}}/interactions/?geneList={{gene_symbol}}&taxId={{tax_id}}&includeInterspecies={{include_interspecies}}&format=json&accesskey={{biogrid_api_key}}",
+              "host": [
+                "{{biogrid_base_url}}"
+              ],
+              "path": [
+                "interactions",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "geneList",
+                  "value": "{{gene_symbol}}"
+                },
+                {
+                  "key": "taxId",
+                  "value": "{{tax_id}}"
+                },
+                {
+                  "key": "includeInterspecies",
+                  "value": "{{include_interspecies}}"
+                },
+                {
+                  "key": "format",
+                  "value": "json"
+                },
+                {
+                  "key": "accesskey",
+                  "value": "{{biogrid_api_key}}"
+                }
+              ]
+            },
+            "description": "Maps to BioGridClient.get_interactions in biogrid.py. Returns full interaction records by default. Client-side slim=True parameter reduces response to symbol_b + experimental_system_type per interaction (~15 tokens vs ~100 full). slim is a client-side parameter and does not change the BioGRID API request."
+          }
+        }
+      ]
+    },
+    {
+      "name": "ClinicalTrials.gov",
+      "item": [
+        {
+          "name": "search_trials",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{clinicaltrials_base_url}}/studies?query.term={{query}}&pageSize={{page_size}}&countTotal=true&format=json&fields=NCTId,BriefTitle,BriefSummary,Phase,OverallStatus,Condition,InterventionName&pageToken={{page_token}}&filter.overallStatus={{status}}&filter.advanced=AREA[Phase]{{phase}}&query.cond={{condition}}&query.intr={{intervention}}&query.locn={{location}}",
+              "host": [
+                "{{clinicaltrials_base_url}}"
+              ],
+              "path": [
+                "studies"
+              ],
+              "query": [
+                {
+                  "key": "query.term",
+                  "value": "{{query}}"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "{{page_size}}"
+                },
+                {
+                  "key": "countTotal",
+                  "value": "true"
+                },
+                {
+                  "key": "format",
+                  "value": "json"
+                },
+                {
+                  "key": "fields",
+                  "value": "NCTId,BriefTitle,BriefSummary,Phase,OverallStatus,Condition,InterventionName"
+                },
+                {
+                  "key": "pageToken",
+                  "value": "{{page_token}}"
+                },
+                {
+                  "key": "filter.overallStatus",
+                  "value": "{{status}}"
+                },
+                {
+                  "key": "filter.advanced",
+                  "value": "AREA[Phase]{{phase}}"
+                },
+                {
+                  "key": "query.cond",
+                  "value": "{{condition}}"
+                },
+                {
+                  "key": "query.intr",
+                  "value": "{{intervention}}"
+                },
+                {
+                  "key": "query.locn",
+                  "value": "{{location}}"
+                }
+              ]
+            },
+            "description": "Maps to ClinicalTrialsClient.search_trials in clinicaltrials.py. filter.overallStatus and filter.advanced are critical params fixed in AGE-132. Remove unused filter params before sending (Postman will send empty values otherwise)."
+          }
+        },
+        {
+          "name": "get_trial",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{clinicaltrials_base_url}}/studies/{{nct_number}}?format=json",
+              "host": [
+                "{{clinicaltrials_base_url}}"
+              ],
+              "path": [
+                "studies",
+                "{{nct_number}}"
+              ],
+              "query": [
+                {
+                  "key": "format",
+                  "value": "json"
+                }
+              ]
+            },
+            "description": "Maps to ClinicalTrialsClient.get_trial in clinicaltrials.py."
+          }
+        },
+        {
+          "name": "get_trial_locations",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{clinicaltrials_base_url}}/studies/{{nct_number}}?format=json&fields=ContactsLocationsModule",
+              "host": [
+                "{{clinicaltrials_base_url}}"
+              ],
+              "path": [
+                "studies",
+                "{{nct_number}}"
+              ],
+              "query": [
+                {
+                  "key": "format",
+                  "value": "json"
+                },
+                {
+                  "key": "fields",
+                  "value": "ContactsLocationsModule"
+                }
+              ]
+            },
+            "description": "Maps to ClinicalTrialsClient.get_trial_locations in clinicaltrials.py. Returns location and contact information for a specific trial."
+          }
+        }
+      ]
+    },
+    {
+      "name": "DrugBank",
+      "item": [
+        {
+          "name": "search_drugs",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{drugbank_api_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{drugbank_commercial_base_url}}/drugs?q={{query}}&page={{page}}&per_page={{per_page}}",
+              "host": [
+                "{{drugbank_commercial_base_url}}"
+              ],
+              "path": [
+                "drugs"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "{{query}}"
+                },
+                {
+                  "key": "page",
+                  "value": "{{page}}"
+                },
+                {
+                  "key": "per_page",
+                  "value": "{{per_page}}"
+                }
+              ]
+            },
+            "description": "Maps to DrugBankClient.search_drugs in drugbank.py. Uses commercial API endpoint. Public fallback (go.drugbank.com/unearth/q) used when no API key is configured."
+          }
+        },
+        {
+          "name": "get_drug",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{drugbank_api_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{drugbank_base_url}}/drugs/{{db_id}}",
+              "host": [
+                "{{drugbank_base_url}}"
+              ],
+              "path": [
+                "drugs",
+                "{{db_id}}"
+              ]
+            },
+            "description": "Maps to DrugBankClient.get_drug in drugbank.py."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Ensembl",
+      "item": [
+        {
+          "name": "search_genes",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{ensembl_base_url}}/xrefs/symbol/{{normalized_species}}/{{query}}",
+              "host": [
+                "{{ensembl_base_url}}"
+              ],
+              "path": [
+                "xrefs",
+                "symbol",
+                "{{normalized_species}}",
+                "{{query}}"
+              ]
+            },
+            "description": "Maps to EnsemblClient.search_genes in ensembl.py."
+          }
+        },
+        {
+          "name": "search_genes.get_gene_details",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{ensembl_base_url}}/lookup/id/{{ensembl_id}}",
+              "host": [
+                "{{ensembl_base_url}}"
+              ],
+              "path": [
+                "lookup",
+                "id",
+                "{{ensembl_id}}"
+              ]
+            },
+            "description": "Sub-call within EnsemblClient.search_genes (maps to _get_gene_details). Retrieves basic gene info without expand parameter. Used to enrich search candidates."
+          }
+        },
+        {
+          "name": "get_gene",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{ensembl_base_url}}/lookup/id/{{ensembl_id}}?expand=1",
+              "host": [
+                "{{ensembl_base_url}}"
+              ],
+              "path": [
+                "lookup",
+                "id",
+                "{{ensembl_id}}"
+              ],
+              "query": [
+                {
+                  "key": "expand",
+                  "value": "1"
+                }
+              ]
+            },
+            "description": "Maps to EnsemblClient.get_gene in ensembl.py. expand=1 includes transcript data."
+          }
+        },
+        {
+          "name": "get_gene.xrefs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{ensembl_base_url}}/xrefs/id/{{ensembl_id}}",
+              "host": [
+                "{{ensembl_base_url}}"
+              ],
+              "path": [
+                "xrefs",
+                "id",
+                "{{ensembl_id}}"
+              ]
+            },
+            "description": "Maps to EnsemblClient.get_gene cross-reference lookup in ensembl.py."
+          }
+        },
+        {
+          "name": "get_transcript",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{ensembl_base_url}}/lookup/id/{{transcript_id}}",
+              "host": [
+                "{{ensembl_base_url}}"
+              ],
+              "path": [
+                "lookup",
+                "id",
+                "{{transcript_id}}"
+              ]
+            },
+            "description": "Maps to EnsemblClient.get_transcript in ensembl.py."
+          }
+        },
+        {
+          "name": "get_transcript.xrefs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{ensembl_base_url}}/xrefs/id/{{transcript_id}}",
+              "host": [
+                "{{ensembl_base_url}}"
+              ],
+              "path": [
+                "xrefs",
+                "id",
+                "{{transcript_id}}"
+              ]
+            },
+            "description": "Maps to EnsemblClient.get_transcript cross-reference lookup in ensembl.py."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Entrez",
+      "item": [
+        {
+          "name": "search_genes",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{entrez_base_url}}/esearch.fcgi?db={{db}}&term={{term}}&retmax={{retmax}}&retstart={{retstart}}&retmode=json&api_key={{ncbi_api_key}}",
+              "host": [
+                "{{entrez_base_url}}"
+              ],
+              "path": [
+                "esearch.fcgi"
+              ],
+              "query": [
+                {
+                  "key": "db",
+                  "value": "{{db}}"
+                },
+                {
+                  "key": "term",
+                  "value": "{{term}}"
+                },
+                {
+                  "key": "retmax",
+                  "value": "{{retmax}}"
+                },
+                {
+                  "key": "retstart",
+                  "value": "{{retstart}}"
+                },
+                {
+                  "key": "retmode",
+                  "value": "json"
+                },
+                {
+                  "key": "api_key",
+                  "value": "{{ncbi_api_key}}"
+                }
+              ]
+            },
+            "description": "Maps to EntrezClient._esearch in entrez.py. retmax/retstart control pagination. api_key is optional (increases rate limit from 3 to 10 req/s)."
+          }
+        },
+        {
+          "name": "search_genes.esummary",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{entrez_base_url}}/esummary.fcgi?db={{db}}&id={{id}}&retmode=json&api_key={{ncbi_api_key}}",
+              "host": [
+                "{{entrez_base_url}}"
+              ],
+              "path": [
+                "esummary.fcgi"
+              ],
+              "query": [
+                {
+                  "key": "db",
+                  "value": "{{db}}"
+                },
+                {
+                  "key": "id",
+                  "value": "{{id}}"
+                },
+                {
+                  "key": "retmode",
+                  "value": "json"
+                },
+                {
+                  "key": "api_key",
+                  "value": "{{ncbi_api_key}}"
+                }
+              ]
+            },
+            "description": "Maps to EntrezClient._esummary in entrez.py."
+          }
+        },
+        {
+          "name": "get_gene",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{entrez_base_url}}/efetch.fcgi?db={{db}}&id={{id}}&retmode=xml&api_key={{ncbi_api_key}}",
+              "host": [
+                "{{entrez_base_url}}"
+              ],
+              "path": [
+                "efetch.fcgi"
+              ],
+              "query": [
+                {
+                  "key": "db",
+                  "value": "{{db}}"
+                },
+                {
+                  "key": "id",
+                  "value": "{{id}}"
+                },
+                {
+                  "key": "retmode",
+                  "value": "xml"
+                },
+                {
+                  "key": "api_key",
+                  "value": "{{ncbi_api_key}}"
+                }
+              ]
+            },
+            "description": "Maps to EntrezClient._efetch in entrez.py. Uses retmode=xml (parsed with defusedxml), NOT json."
+          }
+        },
+        {
+          "name": "get_pubmed_links",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{entrez_base_url}}/elink.fcgi?dbfrom={{dbfrom}}&db={{db}}&id={{id}}&linkname={{linkname}}&retmode=json&api_key={{ncbi_api_key}}",
+              "host": [
+                "{{entrez_base_url}}"
+              ],
+              "path": [
+                "elink.fcgi"
+              ],
+              "query": [
+                {
+                  "key": "dbfrom",
+                  "value": "{{dbfrom}}"
+                },
+                {
+                  "key": "db",
+                  "value": "{{db}}"
+                },
+                {
+                  "key": "id",
+                  "value": "{{id}}"
+                },
+                {
+                  "key": "linkname",
+                  "value": "{{linkname}}"
+                },
+                {
+                  "key": "retmode",
+                  "value": "json"
+                },
+                {
+                  "key": "api_key",
+                  "value": "{{ncbi_api_key}}"
+                }
+              ]
+            },
+            "description": "Maps to EntrezClient._elink in entrez.py. linkname filters to specific link type (e.g., gene_pubmed)."
+          }
+        }
+      ]
+    },
+    {
+      "name": "HGNC",
+      "item": [
+        {
+          "name": "search_genes",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{hgnc_base_url}}/search/{{query}}",
+              "host": [
+                "{{hgnc_base_url}}"
+              ],
+              "path": [
+                "search",
+                "{{query}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "search_genes.by_alias",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{hgnc_base_url}}/search/alias_symbol/{{query}}",
+              "host": [
+                "{{hgnc_base_url}}"
+              ],
+              "path": [
+                "search",
+                "alias_symbol",
+                "{{query}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "get_gene",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{hgnc_base_url}}/fetch/hgnc_id/{{numeric_id}}",
+              "host": [
+                "{{hgnc_base_url}}"
+              ],
+              "path": [
+                "fetch",
+                "hgnc_id",
+                "{{numeric_id}}"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "IUPHAR",
+      "item": [
+        {
+          "name": "search_ligands",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{iuphar_base_url}}/ligands?name={{name}}&type={{type}}&approved={{approved}}",
+              "host": [
+                "{{iuphar_base_url}}"
+              ],
+              "path": [
+                "ligands"
+              ],
+              "query": [
+                {
+                  "key": "name",
+                  "value": "{{name}}"
+                },
+                {
+                  "key": "type",
+                  "value": "{{type}}"
+                },
+                {
+                  "key": "approved",
+                  "value": "{{approved}}"
+                }
+              ]
+            },
+            "description": "Maps to IUPHARClient.search_ligands in iuphar.py. Uses 'approved' param (not 'includePubs')."
+          }
+        },
+        {
+          "name": "get_ligand",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{iuphar_base_url}}/ligands/{{ligand_id}}",
+              "host": [
+                "{{iuphar_base_url}}"
+              ],
+              "path": [
+                "ligands",
+                "{{ligand_id}}"
+              ]
+            },
+            "description": "Maps to IUPHARClient.get_ligand in iuphar.py."
+          }
+        },
+        {
+          "name": "get_ligand.synonyms",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{iuphar_base_url}}/ligands/{{ligand_id}}/synonyms",
+              "host": [
+                "{{iuphar_base_url}}"
+              ],
+              "path": [
+                "ligands",
+                "{{ligand_id}}",
+                "synonyms"
+              ]
+            },
+            "description": "Maps to IUPHARClient.get_ligand synonym lookup in iuphar.py."
+          }
+        },
+        {
+          "name": "get_ligand.database_links",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{iuphar_base_url}}/ligands/{{ligand_id}}/databaseLinks",
+              "host": [
+                "{{iuphar_base_url}}"
+              ],
+              "path": [
+                "ligands",
+                "{{ligand_id}}",
+                "databaseLinks"
+              ]
+            },
+            "description": "Maps to IUPHARClient.get_ligand cross-reference lookup in iuphar.py."
+          }
+        },
+        {
+          "name": "search_targets",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{iuphar_base_url}}/targets?name={{name}}&type={{type}}&geneSymbol={{gene_symbol}}",
+              "host": [
+                "{{iuphar_base_url}}"
+              ],
+              "path": [
+                "targets"
+              ],
+              "query": [
+                {
+                  "key": "name",
+                  "value": "{{name}}"
+                },
+                {
+                  "key": "type",
+                  "value": "{{type}}"
+                },
+                {
+                  "key": "geneSymbol",
+                  "value": "{{gene_symbol}}"
+                }
+              ]
+            },
+            "description": "Maps to IUPHARClient.search_targets in iuphar.py. geneSymbol filters by gene symbol."
+          }
+        },
+        {
+          "name": "get_target",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{iuphar_base_url}}/targets/{{target_id}}",
+              "host": [
+                "{{iuphar_base_url}}"
+              ],
+              "path": [
+                "targets",
+                "{{target_id}}"
+              ]
+            },
+            "description": "Maps to IUPHARClient.get_target in iuphar.py."
+          }
+        },
+        {
+          "name": "get_target.database_links",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{iuphar_base_url}}/targets/{{target_id}}/databaseLinks",
+              "host": [
+                "{{iuphar_base_url}}"
+              ],
+              "path": [
+                "targets",
+                "{{target_id}}",
+                "databaseLinks"
+              ]
+            },
+            "description": "Maps to IUPHARClient.get_target cross-reference lookup in iuphar.py."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Open Targets",
+      "item": [
+        {
+          "name": "search_targets",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{opentargets_graphql_url}}",
+              "host": [
+                "{{opentargets_graphql_url}}"
+              ],
+              "path": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"query SearchTargets($queryString: String!, $size: Int!, $index: Int!) { search(queryString: $queryString, entityNames: [\\\"target\\\"], page: {size: $size, index: $index}) { hits { id name description entity } total } }\",\n  \"variables\": {\n    \"queryString\": \"TP53\",\n    \"size\": 10,\n    \"index\": 0\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "get_target",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{opentargets_graphql_url}}",
+              "host": [
+                "{{opentargets_graphql_url}}"
+              ],
+              "path": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"query GetTarget($ensemblId: String!) { target(ensemblId: $ensemblId) { id approvedSymbol approvedName biotype functionDescriptions dbXrefs { source id } } }\",\n  \"variables\": {\n    \"ensemblId\": \"ENSG00000141510\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "get_associations",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{opentargets_graphql_url}}",
+              "host": [
+                "{{opentargets_graphql_url}}"
+              ],
+              "path": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"query GetAssociations($ensemblId: String!, $size: Int!, $index: Int!) { target(ensemblId: $ensemblId) { id associatedDiseases(page: {size: $size, index: $index}) { rows { disease { id name } score } count } } }\",\n  \"variables\": {\n    \"ensemblId\": \"ENSG00000141510\",\n    \"size\": 10,\n    \"index\": 0\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "PubChem",
+      "item": [
+        {
+          "name": "search_compounds",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{pubchem_base_url}}/compound/name/{{name}}/cids/JSON",
+              "host": [
+                "{{pubchem_base_url}}"
+              ],
+              "path": [
+                "compound",
+                "name",
+                "{{name}}",
+                "cids",
+                "JSON"
+              ]
+            }
+          }
+        },
+        {
+          "name": "get_compound",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{pubchem_base_url}}/compound/cid/{{cid_str}}/property/{{prop_str}}/JSON",
+              "host": [
+                "{{pubchem_base_url}}"
+              ],
+              "path": [
+                "compound",
+                "cid",
+                "{{cid_str}}",
+                "property",
+                "{{prop_str}}",
+                "JSON"
+              ]
+            }
+          }
+        },
+        {
+          "name": "get_compound.synonyms",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{pubchem_base_url}}/compound/cid/{{cid}}/synonyms/JSON",
+              "host": [
+                "{{pubchem_base_url}}"
+              ],
+              "path": [
+                "compound",
+                "cid",
+                "{{cid}}",
+                "synonyms",
+                "JSON"
+              ]
+            }
+          }
+        },
+        {
+          "name": "get_compound.xrefs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{pubchem_base_url}}/compound/cid/{{cid}}/xrefs/RegistryID/JSON",
+              "host": [
+                "{{pubchem_base_url}}"
+              ],
+              "path": [
+                "compound",
+                "cid",
+                "{{cid}}",
+                "xrefs",
+                "RegistryID",
+                "JSON"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "STRING",
+      "item": [
+        {
+          "name": "search_proteins",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{string_base_url}}/json/resolve?identifiers={{identifiers}}&species={{species}}&format=json",
+              "host": [
+                "{{string_base_url}}"
+              ],
+              "path": [
+                "json",
+                "resolve"
+              ],
+              "query": [
+                {
+                  "key": "identifiers",
+                  "value": "{{identifiers}}"
+                },
+                {
+                  "key": "species",
+                  "value": "{{species}}"
+                },
+                {
+                  "key": "format",
+                  "value": "json"
+                }
+              ]
+            },
+            "description": "Maps to STRINGClient.search_proteins in string.py."
+          }
+        },
+        {
+          "name": "get_interactions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{string_base_url}}/json/network?identifiers={{identifiers}}&species={{species}}&required_score={{required_score}}&limit={{limit}}&format=json",
+              "host": [
+                "{{string_base_url}}"
+              ],
+              "path": [
+                "json",
+                "network"
+              ],
+              "query": [
+                {
+                  "key": "identifiers",
+                  "value": "{{identifiers}}"
+                },
+                {
+                  "key": "species",
+                  "value": "{{species}}"
+                },
+                {
+                  "key": "required_score",
+                  "value": "{{required_score}}"
+                },
+                {
+                  "key": "limit",
+                  "value": "{{limit}}"
+                },
+                {
+                  "key": "format",
+                  "value": "json"
+                }
+              ]
+            },
+            "description": "Maps to STRINGClient.get_interactions in string.py. required_score is confidence threshold (0-1000, default 400). limit is max interactions returned."
+          }
+        },
+        {
+          "name": "get_network_image_url",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{string_base_url}}/highres_image/network?identifiers={{identifiers}}&species={{species}}&add_nodes={{add_nodes}}&network_flavor={{network_flavor}}",
+              "host": [
+                "{{string_base_url}}"
+              ],
+              "path": [
+                "highres_image",
+                "network"
+              ],
+              "query": [
+                {
+                  "key": "identifiers",
+                  "value": "{{identifiers}}"
+                },
+                {
+                  "key": "species",
+                  "value": "{{species}}"
+                },
+                {
+                  "key": "add_nodes",
+                  "value": "{{add_nodes}}"
+                },
+                {
+                  "key": "network_flavor",
+                  "value": "{{network_flavor}}"
+                }
+              ]
+            },
+            "description": "Maps to STRINGClient.get_network_image_url in string.py. Returns PNG image (not JSON). network_flavor: confidence, evidence, or actions. add_nodes: number of interaction partners (default 10)."
+          }
+        }
+      ]
+    },
+    {
+      "name": "UniProt",
+      "item": [
+        {
+          "name": "search_proteins",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{uniprot_base_url}}/uniprotkb/search?query={{query}}&size={{size}}&fields=accession,id,gene_names,organism_name,protein_name&cursor={{cursor}}",
+              "host": [
+                "{{uniprot_base_url}}"
+              ],
+              "path": [
+                "uniprotkb",
+                "search"
+              ],
+              "query": [
+                {
+                  "key": "query",
+                  "value": "{{query}}"
+                },
+                {
+                  "key": "size",
+                  "value": "{{size}}"
+                },
+                {
+                  "key": "fields",
+                  "value": "accession,id,gene_names,organism_name,protein_name"
+                },
+                {
+                  "key": "cursor",
+                  "value": "{{cursor}}"
+                }
+              ]
+            },
+            "description": "Maps to UniProtClient.search_proteins in uniprot.py. Uses Accept: application/json header (not format query param) for content negotiation. fields selects specific data columns. cursor enables pagination (value from previous response Link header)."
+          }
+        },
+        {
+          "name": "get_protein",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{uniprot_base_url}}/uniprotkb/{{accession}}.json",
+              "host": [
+                "{{uniprot_base_url}}"
+              ],
+              "path": [
+                "uniprotkb",
+                "{{accession}}.json"
+              ]
+            },
+            "description": "Maps to UniProtClient.get_protein in uniprot.py."
+          }
+        }
+      ]
+    },
+    {
+      "name": "WikiPathways",
+      "item": [
+        {
+          "name": "search_pathways",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{wikipathways_base_url}}/findPathwaysByText?query={{query}}&species={{species}}&format=json",
+              "host": [
+                "{{wikipathways_base_url}}"
+              ],
+              "path": [
+                "findPathwaysByText"
+              ],
+              "query": [
+                {
+                  "key": "query",
+                  "value": "{{query}}"
+                },
+                {
+                  "key": "species",
+                  "value": "{{species}}"
+                },
+                {
+                  "key": "format",
+                  "value": "json"
+                }
+              ]
+            },
+            "description": "Maps to WikiPathwaysClient.search_pathways in wikipathways.py."
+          }
+        },
+        {
+          "name": "get_pathways_for_gene",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{wikipathways_base_url}}/findPathwaysByXref?ids={{gene_id}}&format=json",
+              "host": [
+                "{{wikipathways_base_url}}"
+              ],
+              "path": [
+                "findPathwaysByXref"
+              ],
+              "query": [
+                {
+                  "key": "ids",
+                  "value": "{{gene_id}}"
+                },
+                {
+                  "key": "format",
+                  "value": "json"
+                }
+              ]
+            },
+            "description": "Maps to WikiPathwaysClient.get_pathways_for_gene in wikipathways.py. ids is a gene identifier (e.g., BRCA1, HGNC:1100)."
+          }
+        },
+        {
+          "name": "get_pathway.xref_cache",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{wikipathways_json_base_url}}/findPathwaysByXref.json",
+              "host": [
+                "{{wikipathways_json_base_url}}"
+              ],
+              "path": [
+                "findPathwaysByXref.json"
+              ]
+            },
+            "description": "Bulk JSON cache of all pathway-xref mappings. Used by WikiPathwaysClient for batch lookups."
+          }
+        },
+        {
+          "name": "get_pathway",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{wikipathways_base_url}}/getPathwayInfo?pwId={{pathway_id}}&format=json",
+              "host": [
+                "{{wikipathways_base_url}}"
+              ],
+              "path": [
+                "getPathwayInfo"
+              ],
+              "query": [
+                {
+                  "key": "pwId",
+                  "value": "{{pathway_id}}"
+                },
+                {
+                  "key": "format",
+                  "value": "json"
+                }
+              ]
+            },
+            "description": "Maps to WikiPathwaysClient.get_pathway in wikipathways.py."
+          }
+        },
+        {
+          "name": "get_pathway_components.xref_list",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{wikipathways_base_url}}/getXrefList?pwId={{pathway_id}}&code={{code}}&format=json",
+              "host": [
+                "{{wikipathways_base_url}}"
+              ],
+              "path": [
+                "getXrefList"
+              ],
+              "query": [
+                {
+                  "key": "pwId",
+                  "value": "{{pathway_id}}"
+                },
+                {
+                  "key": "code",
+                  "value": "{{code}}"
+                },
+                {
+                  "key": "format",
+                  "value": "json"
+                }
+              ]
+            },
+            "description": "Maps to WikiPathwaysClient.get_pathway component counts in wikipathways.py. code values: L=Entrez Gene, H=HGNC, En=Ensembl, S=UniProt, Ce=ChEMBL, Ch=CHEBI."
+          }
+        }
+      ]
+    }
+  ]
+}

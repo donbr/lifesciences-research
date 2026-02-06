@@ -37,32 +37,46 @@
 - Separate endpoints for physical vs genetic interactions → Not available; BioGRID returns both types
 - SPARQL endpoint → Too complex for agent usage
 
-### 2. Gene Symbol Validation
+### 2. Gene Symbol Search & Validation
 
 **Question**: How should gene symbols be validated before querying BioGRID?
 
 **Findings**:
 - **BioGRID Behavior**: Accepts gene symbols case-insensitively, normalizes to uppercase
 - **Symbol Format**: Typically 1-15 alphanumeric characters, may include hyphens (e.g., "TP53", "HLA-A")
-- **Invalid Symbols**: BioGRID returns empty result set, not error
+- **Invalid Symbols**: BioGRID returns count of 0 (empty result set), not error
 - **Synonym Handling**: `searchNames=true` enables search by gene name or synonym
+- **Count Endpoint**: `format=count` on `/interactions/` returns a single integer (~200ms response)
+
+**Decision**: API-backed search using `/interactions?format=count&searchNames=true`
+
+**Rationale**:
+- Confirms gene exists in BioGRID database; prevents hallucinated gene symbols per Constitution Principle II
+- `format=count` is lightweight (~200ms) — returns single integer, not full interaction data
+- `searchNames=true` matches gene synonyms for broader coverage
+- Client-side regex serves as fail-fast guard only (prevents invalid API calls)
+- `count == 0` → ENTITY_NOT_FOUND error (gene not in BioGRID)
+- `count > 0` → return BioGridSearchCandidate with `interaction_count` metadata
 
 **Validation Pattern**:
 ```python
-# Regex for gene symbol validation
-GENE_SYMBOL_PATTERN = r"^[A-Z0-9][A-Z0-9\-]{0,14}$"  # 1-15 chars, alphanumeric + hyphen
+# Client-side regex as fail-fast guard (NOT the primary validation)
+GENE_SYMBOL_PATTERN = r"^[A-Z0-9][A-Z0-9\-_@.]{0,29}$"
+
+# Primary validation: BioGRID API with format=count
+params = {
+    "geneList": symbol,
+    "taxId": organism,
+    "searchNames": "true",
+    "format": "count",
+}
 ```
 
-**Decision**: Implement client-side validation with regex pattern + uppercase normalization
-
-**Rationale**:
-- Prevents unnecessary API calls for obviously invalid input
-- BioGRID's silent failure (empty results) is not agent-friendly
-- Client validation provides immediate AMBIGUOUS_QUERY error
-
 **Alternatives Considered**:
-- Rely solely on BioGRID server-side validation → Too permissive (accepts invalid input)
+- Client-side regex only (original decision) → Violates Constitution Principle II; no proof gene exists in BioGRID
+- Rely solely on BioGRID server-side validation → Too permissive (accepts invalid input without error)
 - Use HGNC for symbol validation → Adds unnecessary dependency; BioGRID accepts symbols from multiple organisms
+- Full `/interactions?format=json` → Too heavy for existence check; `format=count` is sufficient
 
 ### 3. Experimental System Types
 
@@ -234,7 +248,7 @@ async def _rate_limited_get(self, url: str, params: dict) -> dict:
 All NEEDS CLARIFICATION items from plan.md Technical Context have been resolved:
 
 1. ✅ BioGRID API endpoint: `/interactions` with gene symbol parameter
-2. ✅ Gene symbol validation: Client-side regex + uppercase normalization
+2. ✅ Gene symbol validation: API-backed search (`format=count`) + client-side regex fail-fast guard
 3. ✅ Experimental evidence: Return system, type, and throughput
 4. ✅ API key handling: Require BIOGRID_API_KEY with helpful error
 5. ✅ Rate limiting: 2 req/sec with exponential backoff

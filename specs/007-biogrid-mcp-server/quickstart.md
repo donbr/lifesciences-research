@@ -45,26 +45,26 @@ Interactive testing UI available at `http://localhost:8000`
 **Goal**: Find TP53 interaction partners with experimental evidence
 
 ```python
-# Step 1: Validate gene symbol
+# Step 1: Search and confirm gene exists in BioGRID
 search_result = await client.call_tool("search_genes", {
     "query": "TP53",
     "organism": 9606  # Human
 })
 
-# Result: PaginationEnvelope with validated symbol
+# Result: PaginationEnvelope with confirmed gene and interaction count
 {
   "items": [
     {
       "symbol": "TP53",
       "organism": "Homo sapiens",
       "taxon_id": 9606,
-      "is_valid": true
+      "interaction_count": 14523
     }
   ],
   "pagination": {"cursor": null, "total_count": 1, "page_size": 1}
 }
 
-# Step 2: Get interaction network with validated symbol
+# Step 2: Get interaction network with confirmed symbol
 interactions = await client.call_tool("get_interactions", {
     "gene_symbol": "TP53",
     "organism": 9606,
@@ -232,30 +232,31 @@ result = await client.call_tool("search_genes", {
 })
 ```
 
-### Example: No Interactions Found
+### Example: Gene Not Found in BioGRID
 
 ```python
-# Mistake: Gene has no known interactions or wrong symbol
-result = await client.call_tool("get_interactions", {
-    "gene_symbol": "NONEXISTENT"
+# Mistake: Gene doesn't exist in BioGRID
+result = await client.call_tool("search_genes", {
+    "query": "ZZZZZ99"
 })
 
-# Error response:
+# Error response (search_genes catches this at Phase 1):
 {
   "success": false,
   "error": {
     "code": "ENTITY_NOT_FOUND",
-    "message": "No interactions found for gene symbol: NONEXISTENT",
-    "recovery_hint": "Verify gene symbol is correct and has known interactions in BioGRID. Try search_genes to validate symbol first.",
-    "invalid_input": "NONEXISTENT"
+    "message": "Gene not found in BioGRID: ZZZZZ99",
+    "recovery_hint": "Verify gene symbol is correct. Use HGNC search_genes for official symbol resolution.",
+    "invalid_input": "ZZZZZ99"
   }
 }
 
-# Fix: Validate symbol first
+# Fix: Use a valid gene symbol
 search = await client.call_tool("search_genes", {
     "query": "TP53"
 })
-# Then use validated symbol
+# Returns interaction_count confirming gene exists
+# Then use confirmed symbol for get_interactions
 ```
 
 ## Common Patterns
