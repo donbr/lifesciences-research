@@ -90,7 +90,7 @@ This platform provides **12 MCP servers** organized into 5 tiers by research fun
 - 🔜 **3 servers in the backlog** - KEGG, OMIM, Orphanet
 
 **Test Coverage:**
-- Total tests: 691 passing (integration + unit combined)
+- Total tests: 701 (399 unit + 294 integration + 4 e2e + 4 contract)
 - Coverage: All 12 operational servers have comprehensive test suites
 - Gateway server: 34+ MCP tools from 12 databases
 
@@ -167,10 +167,19 @@ uv run fastmcp run src/lifesciences_mcp/servers/entrez.py        # NCBI gene dat
 uv sync --extra dev
 
 # Run all tests
-uv run pytest tests/ -v
+uv run pytest -v
 
-# Run integration tests only
-uv run pytest -m integration -v
+# Run by test type (recommended)
+uv run pytest -m unit -v           # Unit tests only (399 tests, no network)
+uv run pytest -m integration -v    # Integration tests (294 tests, requires network)
+uv run pytest -m e2e -v            # End-to-end tests (4 tests)
+
+# Run by API (combine with unit/integration)
+uv run pytest -m "unit and clinicaltrials" -v
+uv run pytest -m "integration and chembl" -v
+
+# Exclude integration tests (fast local development)
+uv run pytest -m "not integration" -v
 
 # For per-server test commands, see tests/README.md
 ```

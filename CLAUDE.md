@@ -76,10 +76,18 @@ The `/scaffold-fastmcp` skill generates:
 uv sync                          # Install dependencies
 uv sync --extra dev              # Install with dev dependencies
 
-# Testing
-uv run pytest tests/ -v
-uv run pytest tests/unit/test_file.py::test_name -v  # Single test
-uv run pytest -m "not integration"                    # Unit only
+# Testing (marker-based approach - recommended)
+uv run pytest -m unit -v                              # Unit tests (399 tests, no network)
+uv run pytest -m integration -v                       # Integration tests (294 tests)
+uv run pytest -m e2e -v                               # End-to-end tests (4 tests)
+uv run pytest -m "not integration" -v                 # Fast local dev (excludes network)
+
+# Test specific API
+uv run pytest -m "unit and clinicaltrials" -v         # ClinicalTrials unit tests only
+uv run pytest -m "integration and chembl" -v          # ChEMBL integration tests only
+
+# Single test
+uv run pytest tests/unit/test_file.py::test_name -v
 
 # Linting
 uv run ruff check --fix . && uv run ruff format .
