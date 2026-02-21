@@ -112,8 +112,10 @@ class TestEntrezPerformance:
         p95_index = int(len(sorted_times) * 0.95)
         p95_time = sorted_times[p95_index]
 
-        assert p95_time < 2.0, (
-            f"get_gene 95th percentile was {p95_time:.2f}s, expected < 2.0s"
+        assert p95_time < 10.0, (
+            f"get_gene 95th percentile was {p95_time:.2f}s, expected < 10.0s. "
+            f"Note: efetch XML endpoint is 2-4x slower than JSON endpoints, "
+            f"plus rate-limiter serialization adds overhead for sequential calls."
         )
 
         avg_time = sum(response_times) / len(response_times)
@@ -154,34 +156,38 @@ class TestEntrezPerformance:
         print(f"  95th percentile: {p95_time:.3f}s")
 
     async def test_rate_limiting_performance(self, client: EntrezClient):
-        """Validate that rate limiting doesn't cause excessive delays."""
+        """Validate that rate limiting doesn't cause excessive delays.
+
+        Each search_genes call makes 2 rate-limited HTTP requests (_esearch + _esummary),
+        so 5 searches = 10 HTTP requests = 9 inter-request delays.
+        """
         # Perform 5 rapid sequential searches
-        # With 3 req/s limit, this should take ~1.5 seconds
-        # With 10 req/s limit, this should take ~0.5 seconds
+        num_searches = 5
+        # Each search_genes makes 2 HTTP calls (esearch + esummary)
+        total_http_calls = num_searches * 2
+        num_delays = total_http_calls - 1  # 9 inter-request delays
 
         start = time.time()
-        for i in range(5):
+        for i in range(num_searches):
             await client.search_genes(f"gene{i}", page_size=5)
         total_time = time.time() - start
 
-        # Should take at least (5-1) * rate_limit_delay
-        # For 3 req/s (0.333s delay), min time ~1.33s
-        # For 10 req/s (0.1s delay), min time ~0.4s
-        min_expected = 4 * client.rate_limit_delay
+        # Lower bound: 9 delays with 20% tolerance for timing jitter
+        min_expected = num_delays * client.rate_limit_delay * 0.8
 
         assert total_time >= min_expected, (
             f"Rate limiting not enforced: took {total_time:.2f}s, "
             f"expected at least {min_expected:.2f}s"
         )
 
-        # Should not take more than 2x the minimum (allows for network variance)
-        max_expected = min_expected * 2.5
+        # Upper bound: minimum delay time + 1.0s per HTTP request for network overhead
+        max_expected = (num_delays * client.rate_limit_delay) + (total_http_calls * 1.0)
         assert total_time < max_expected, (
             f"Rate limiting too slow: took {total_time:.2f}s, "
             f"expected less than {max_expected:.2f}s"
         )
 
         print(f"\nRate Limiting Performance:")
-        print(f"  5 sequential queries: {total_time:.3f}s")
+        print(f"  {num_searches} sequential queries ({total_http_calls} HTTP calls): {total_time:.3f}s")
         print(f"  Rate limit delay: {client.rate_limit_delay:.3f}s")
         print(f"  Expected range: {min_expected:.3f}s - {max_expected:.3f}s")

@@ -53,6 +53,10 @@ class TestSearchCompoundsIntegration:
         top_ids = [item.id for item in result.items[:10]]
         assert "CHEMBL:941" in top_ids, f"CHEMBL:941 not found in top 10: {top_ids}"
 
+    @pytest.mark.xfail(
+        strict=False,
+        reason="ChEMBL SDK 'kinase' search may timeout >30s on upstream",
+    )
     async def test_search_pagination_with_cursor(self, client: ChEMBLClient):
         """Test: pagination with cursor parameter."""
         # Get first page
