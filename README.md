@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/donbr-lifesciences-research-badge.png)](https://mseep.ai/app/donbr-lifesciences-research)
+
 # Life Sciences MCP 🧬🤖
 
 > **A Model Context Protocol platform for grounding agents in live, verifiable biological truth — designed to contain data rot, not amplify it.**
