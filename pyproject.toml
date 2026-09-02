@@ -52,6 +52,7 @@ markers = [
     "wikipathways: tests for WikiPathways API",
     "clinicaltrials: tests for ClinicalTrials.gov API",
     "drugbank: tests for DrugBank API",
+    "depmap: tests for DepMap genotype-selective dependency (Sanger REST + local contrast)",
 ]
 # Global timeout: prevent any test from hanging indefinitely
 # Individual tests can override with @pytest.mark.timeout(N)

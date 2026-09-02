@@ -20,6 +20,7 @@ FastMCP wrappers for essential life sciences APIs, enabling LLM agents to query 
 - IUPHAR/GtoPdb server v0.1.0 - ✅ Complete (59 tests: 48 integration + 11 unit, all 5 User Stories)
 - WikiPathways server v0.1.0 - ✅ Complete (4 tools, 17 integration tests passing)
 - ClinicalTrials.gov server v0.1.0 - ✅ Complete (3 tools, 13 unit tests passing | Manual curl testing required due to Cloudflare blocking)
+- DepMap server v0.1.0 - ✅ Complete (83 tests: 64 unit + 19 integration, 5 tools | gene-effect requires a cached release)
 
 **Platform Skills:**
 - lifesciences-crispr - ✅ Complete (BioGRID ORCS 5-phase synthetic lethality validation workflow)
@@ -180,7 +181,8 @@ src/lifesciences_mcp/
 │   ├── pubchem.py       # PubChemClient (async httpx) ✅ Tier 2
 │   ├── iuphar.py        # IUPHARClient (async httpx) ✅ Tier 2
 │   ├── wikipathways.py  # WikiPathwaysClient (async httpx) ✅ Tier 3
-│   └── clinicaltrials.py # ClinicalTrialsClient (async httpx) ✅ Tier 3
+│   ├── clinicaltrials.py # ClinicalTrialsClient (async httpx) ✅ Tier 3
+│   └── depmap.py        # DepMapClient (async httpx + local alias index + contrast core) ✅
 ├── models/
 │   ├── __init__.py      # Model exports
 │   ├── envelopes.py     # PaginationEnvelope, ErrorEnvelope
@@ -200,7 +202,8 @@ src/lifesciences_mcp/
 │   ├── pathway_components.py # PathwayComponents, DataNode, Interaction
 │   ├── provenance.py    # Provenance tracking models
 │   ├── trial.py         # Trial, TrialSearchCandidate, TrialProtocol, EligibilityCriteria
-│   └── trial_location.py # TrialLocation
+│   ├── trial_location.py # TrialLocation
+│   └── depmap.py         # CellModel, DependencyRecord, GenotypeCohort, GenotypeContrast
 └── servers/
     ├── hgnc.py          # HGNC MCP server (search_genes, get_gene)
     ├── uniprot.py       # UniProt MCP server (search_proteins, get_protein)
@@ -215,7 +218,8 @@ src/lifesciences_mcp/
     ├── iuphar.py        # IUPHAR MCP server (search_ligands, get_ligand, search_targets, get_target) ✅ Tier 2
     ├── wikipathways.py  # WikiPathways MCP server (search_pathways, get_pathway, get_pathways_for_gene, get_pathway_components) ✅ Tier 3
     ├── clinicaltrials.py # ClinicalTrials MCP server (search_trials, get_trial, get_trial_locations) ✅ Tier 3
-    └── gateway.py       # Unified gateway server (mounts all 12 servers for FastMCP Cloud deployment)
+    ├── depmap.py        # DepMap MCP server (search_models, get_model, models_with_mutation, get_dependency, genotype_contrast_by_gene) ✅
+    └── gateway.py       # Unified gateway server (mounts all 13 servers for FastMCP Cloud deployment)
 ```
 
 ### Implemented Tools (Summary)
@@ -236,6 +240,7 @@ All 12 servers follow the **Fuzzy-to-Fact Protocol**: fuzzy search returns ranke
 | **IUPHAR** | `search_ligands`, `get_ligand`, `search_targets`, `get_target` | `IUPHAR:2713` | 59 |
 | **WikiPathways** | `search_pathways`, `get_pathway`, `get_pathways_for_gene`, `get_pathway_components` | `WP:WP534` | 17 |
 | **ClinicalTrials** | `search_trials`, `get_trial`, `get_trial_locations` | `NCT:00461032` | 13 |
+| **DepMap** | `search_models`, `get_model`, `models_with_mutation`, `get_dependency`, `genotype_contrast_by_gene` | `SIDM:00903` | 83 |
 | **DrugBank** | `search_drugs`, `get_drug` | `DrugBank:DB00945` | 33 (⛔ API key required) |
 
 **Run any server:**
@@ -259,6 +264,12 @@ For detailed server documentation (API details, rate limits, workflows), see the
 **Note:** DrugBank requires commercial API key (`DRUGBANK_API_KEY`). Implementation complete, integration tests skipped without key.
 
 **Note:** ClinicalTrials.gov integration tests blocked by Cloudflare. See Manual Testing section above for curl-based verification.  This does not impact production MCP usage.
+
+**Note:** DepMap gene-effect values are not served by any query API. Cell Model Passports
+exposes only a `crispr_ko_available` flag, so `get_dependency` and `genotype_contrast_by_gene`
+read a checksum-pinned release file and return `UPSTREAM_ERROR` when none is configured, rather
+than a zero that would read as a measurement. Cell Model Passports is non-commercial and
+third-party application use requires prior permission from depmap@sanger.ac.uk.
 
 **Note:** BioGRID requires free API key (`BIOGRID_API_KEY`) from https://webservice.thebiogrid.org/.  The API key exists in the current environment in the `.env` file.
 
@@ -344,3 +355,6 @@ git switch -c implement/<id>-<description>
 **Trade-off:** Session scope is more efficient but means if an API goes down mid-test-run, subsequent tests won't skip. Module scope is a middle ground.
 
 **Reference:** PR #18 review comment suggested this optimization.
+
+## Recent Changes
+- 014-depmap-mcp-server: DepMap genotype-selective dependency server. Python 3.11+, FastMCP, async httpx, pydantic v2; no new third-party dependency.
