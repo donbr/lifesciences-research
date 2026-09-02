@@ -28,6 +28,13 @@ from lifesciences_mcp.models.entrez import (
 from lifesciences_mcp.models.entrez import (
     GeneSearchCandidate as EntrezGeneSearchCandidate,
 )
+from lifesciences_mcp.models.depmap import (
+    CellModel,
+    DepMapCrossReferences,
+    DependencyRecord,
+    GenotypeCohort,
+    GenotypeContrast,
+)
 from lifesciences_mcp.models.envelopes import (
     ErrorDetail,
     ErrorEnvelope,
@@ -133,6 +140,11 @@ __all__ = [
     "Sponsor",
     "Target",
     "TargetSearchCandidate",
+    "CellModel",
+    "DepMapCrossReferences",
+    "DependencyRecord",
+    "GenotypeCohort",
+    "GenotypeContrast",
     "Trial",
     "TrialLocation",
     "TrialProtocol",

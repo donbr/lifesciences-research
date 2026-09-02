@@ -1,6 +1,6 @@
 """Life Sciences MCP Gateway Server - Unified access to all life sciences APIs.
 
-This gateway server composes 12 of 13 individual MCP servers into a single
+This gateway server composes 13 of 14 individual MCP servers into a single
 unified server for deployment to FastMCP Cloud.
 
 Tools are accessible with prefixes:
@@ -10,6 +10,7 @@ Tools are accessible with prefixes:
 - opentargets_search_targets, opentargets_get_target, opentargets_get_associations
 - string_search_proteins, string_get_interactions, string_get_network_image_url
 - biogrid_search_genes, biogrid_get_interactions
+- depmap_search_models, depmap_get_model, depmap_models_with_mutation, depmap_get_dependency, depmap_genotype_contrast_by_gene
 - ensembl_search_genes, ensembl_get_gene, ensembl_get_transcript
 - entrez_search_genes, entrez_get_gene, entrez_get_pubmed_links
 - pubchem_search_compounds, pubchem_get_compound, pubchem_get_compound_synonyms
@@ -31,6 +32,7 @@ from fastmcp import FastMCP
 from lifesciences_mcp.servers.biogrid import mcp as biogrid_mcp
 from lifesciences_mcp.servers.chembl import mcp as chembl_mcp
 from lifesciences_mcp.servers.clinicaltrials import mcp as clinicaltrials_mcp
+from lifesciences_mcp.servers.depmap import mcp as depmap_mcp
 from lifesciences_mcp.servers.ensembl import mcp as ensembl_mcp
 from lifesciences_mcp.servers.entrez import mcp as entrez_mcp
 from lifesciences_mcp.servers.hgnc import mcp as hgnc_mcp
@@ -75,6 +77,13 @@ mcp.mount(string_mcp, prefix="string", as_proxy=False, tool_names={
 mcp.mount(biogrid_mcp, prefix="biogrid", as_proxy=False, tool_names={
     "search_genes": "biogrid_search_genes",
     "get_interactions": "biogrid_get_interactions"
+})
+mcp.mount(depmap_mcp, prefix="depmap", as_proxy=False, tool_names={
+    "search_models": "depmap_search_models",
+    "get_model": "depmap_get_model",
+    "models_with_mutation": "depmap_models_with_mutation",
+    "get_dependency": "depmap_get_dependency",
+    "genotype_contrast_by_gene": "depmap_genotype_contrast_by_gene"
 })
 mcp.mount(ensembl_mcp, prefix="ensembl", as_proxy=False, tool_names={
     "search_genes": "ensembl_search_genes",

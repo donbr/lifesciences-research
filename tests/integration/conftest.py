@@ -140,3 +140,29 @@ async def check_entrez_available():
     except Exception as e:
         pytest.skip(f"Entrez health check failed: {e}")
     return False
+
+
+@pytest.fixture(scope="function")
+async def check_depmap_available():
+    """Check if the Sanger Cell Model Passports API is reachable before running tests.
+
+    Skips tests if the service is down to prevent hanging tests.
+    """
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=5.0, read=10.0, write=5.0, pool=5.0)
+        ) as client:
+            response = await client.get(
+                "https://api.cellmodelpassports.sanger.ac.uk/models",
+                params={"page[size]": 1},
+                headers={"Accept": "application/vnd.api+json"},
+                follow_redirects=True,
+            )
+            if response.status_code == 200:
+                return True
+            pytest.skip(f"Cell Model Passports API unhealthy: status={response.status_code}")
+    except (httpx.TimeoutException, httpx.ConnectError) as e:
+        pytest.skip(f"Cell Model Passports service unavailable: {e}")
+    except Exception as e:
+        pytest.skip(f"Cell Model Passports health check failed: {e}")
+    return False

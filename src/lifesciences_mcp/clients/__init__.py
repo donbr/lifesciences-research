@@ -25,6 +25,7 @@ from lifesciences_mcp.clients.base import LifeSciencesClient
 from lifesciences_mcp.clients.biogrid import BioGridClient
 from lifesciences_mcp.clients.chembl import ChEMBLClient
 from lifesciences_mcp.clients.clinicaltrials import ClinicalTrialsClient
+from lifesciences_mcp.clients.depmap import DepMapClient
 from lifesciences_mcp.clients.drugbank import DrugBankClient
 from lifesciences_mcp.clients.ensembl import EnsemblClient
 from lifesciences_mcp.clients.entrez import EntrezClient
@@ -40,6 +41,7 @@ __all__ = [
     "BioGridClient",
     "ChEMBLClient",
     "ClinicalTrialsClient",
+    "DepMapClient",
     "DrugBankClient",
     "EnsemblClient",
     "EntrezClient",
