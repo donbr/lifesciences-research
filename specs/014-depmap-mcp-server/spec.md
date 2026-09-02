@@ -21,8 +21,30 @@ server fills that gap.
    gene-effect matrices supplied by the caller: WT-vs-mutant Δdependency + Mann-Whitney +
    (optional) BH FDR + small-cohort exclusion. This is `demeter_validation.py` promoted to a
    reusable, tested tool. **numpy-free core** (no scipy dependency).
-2. **Sanger REST (live cross-validation)** — `search_models` now; `get_dependency` to follow
-   once endpoint paths are confirmed against `/swagger`.
+2. **Sanger REST (model + genotype resolution)** — see confirmed endpoints below.
+
+## Sanger Cell Model Passports endpoints (confirmed live 2026-09-02)
+Base `https://api.cellmodelpassports.sanger.ac.uk`, JSONAPI v1.0, filter syntax
+`?filter=[{"name","op","val"}]`, pagination `page[size]`/`page[number]` with `meta.count`.
+- `/models` — all models (`meta.count` ≈ 2266); record: `id` = `SIDM#####`, `attributes.names`,
+  `*_available` flags (incl. `crispr_ko_available`), `model_type`; tissue/lineage is on the linked `sample`.
+- `/models/<SIDM#####>` — single model → `get_model`.
+- `/models/<source>/<source_id>` — resolve by external id (CCLE_ID, cosmic_id, model_name) → `resolve_model`.
+- `/models/by_<mut_type>/<gene>` — genotype cohort → `models_with_mutation`.
+- `/models/<id>/datasets/<name>` — `mutations` | `cancer_drivers` | `genecnv` | `growth_rate`.
+
+**Two findings that shaped the design:**
+- **`by_mutation` is broad:** `/models/by_mutation/RB1` returns ~2185/2266 models (ANY variant),
+  **not** the paper's damaging/homozygous call. Cohorts must use a specific damaging `mut_type`
+  (frameshift/deletion/splice_variant) or be reconciled against the mutations dataset.
+- **CRISPR gene-effect is NOT a queryable endpoint.** `crispr_ko_available` is only a flag; probes
+  to `/datasets/crispr` and `/datasets/crispr_ko` return empty — the dependency matrix is a Project
+  Score / Data Miner file. **Therefore genotype contrasts consume an offline matrix for both Broad
+  and Sanger; the REST API supplies model + genotype resolution, not dependency values.**
+
+*Unconfirmed / follow-up:* the exact `/models` names-filter operator for free-text `search_models`
+(confirm vs `/swagger`); `search_models` currently best-effort, with `resolve_model`/`get_model` as the
+reliable resolution paths.
 
 ## Tools (Fuzzy-to-Fact, ADR-001 §3)
 - `search_models(query, limit)` — Fuzzy: cell-line candidates (Sanger, provenance-labeled).

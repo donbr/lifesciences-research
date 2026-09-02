@@ -14,8 +14,10 @@ Two data planes (ADR-681 design):
 Follows ADR-001 (async httpx, Fuzzy-to-Fact), ADR-004 (no shutdown hooks), ADR-006 (clients/).
 """
 
+import json
 import math
 from collections.abc import Mapping, Sequence
+from typing import Any, Literal
 
 import httpx
 
@@ -36,6 +38,15 @@ from lifesciences_mcp.models.envelopes import (
 # Genotype encoding (matches the S′ pipeline / DepMap damaging-mutation matrix):
 WT_CALL = 0
 MUT_CALL = 2  # 1 (and anything else) = excluded
+
+# Sanger Cell Model Passports mutation-cohort types (endpoint /models/by_<type>/<gene>).
+# NOTE: "mutation" = ANY variant in the gene (very broad — e.g. by_mutation/RB1 returns
+# ~2185/2266 models). It is NOT the paper's damaging/homozygous call. Use a specific
+# damaging type (frameshift/deletion/splice_variant) or reconcile against the mutations
+# dataset to approximate the S′ genotype definition.
+MutationType = Literal[
+    "mutation", "frameshift", "snp", "insertion", "deletion", "splice_variant"
+]
 
 
 # ---------------------------------------------------------------------------
@@ -199,62 +210,206 @@ class DepMapClient(LifeSciencesClient):
             data_source=data_source,
         )
 
-    # ---- Data plane 2: Sanger Cell Model Passports REST (live cross-validation) ----
-    # NOTE: exact JSONAPI endpoint paths must be confirmed against
-    # https://api.cellmodelpassports.sanger.ac.uk/swagger before enabling integration tests.
+    # ---- Data plane 2: Sanger Cell Model Passports REST (model resolution + cohorts) ----
+    # Confirmed endpoints (JSONAPI v1.0 — https://depmap.sanger.ac.uk/documentation/api/endpoints/):
+    #   /models                          list of all models (meta.count = total, ~2266)
+    #   /models/<SIDM#####>              single model
+    #   /models/<source>/<source_id>     resolve by external id (CCLE_ID, cosmic_id, model_name, ...)
+    #   /models/by_<mut_type>/<gene>     models with a <mut_type> mutation in <gene>  (genotype cohort)
+    #   /models/<id>/datasets/<name>     per-model datasets: mutations | cancer_drivers | genecnv | growth_rate
+    # NOT served as a queryable endpoint: CRISPR gene-effect values. `crispr_ko_available` is only a
+    #   boolean flag; the dependency matrix is a Project Score / Data Miner file download (probes to
+    #   /datasets/crispr and /datasets/crispr_ko return empty). Genotype CONTRASTS therefore use the
+    #   offline matrix core above for BOTH providers; this REST API supplies model + genotype resolution.
+    # Policy: non-commercial; third-party application use requires Sanger permission (depmap@sanger.ac.uk).
+
+    @staticmethod
+    def _candidate(rec: dict[str, Any]) -> DepMapModelCandidate:
+        names = (rec.get("attributes") or {}).get("names") or []
+        return DepMapModelCandidate(
+            model_id=str(rec.get("id")),
+            model_name=names[0] if names else None,
+            lineage=None,  # tissue/lineage is on the linked sample, not model attributes
+            data_source="sanger_project_score",
+        )
+
+    @staticmethod
+    def _unexpected(e: Exception, inp: str) -> ErrorEnvelope:
+        return ErrorEnvelope(
+            error=ErrorDetail(
+                code=ErrorCode.UPSTREAM_ERROR,
+                message=f"Unexpected error: {e!r}",
+                recovery_hint="Check network and the Sanger API (see /documentation/api/endpoints).",
+                invalid_input=inp,
+            )
+        )
+
+    async def _get_json(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        resp = await self._get(
+            path, params=params or {}, headers={"Accept": "application/vnd.api+json"}
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    async def get_model(self, model_id: str) -> DepMapModelCandidate | ErrorEnvelope:
+        """Strict: fetch one model by Sanger id (SIDM#####)."""
+        mid = model_id.strip()
+        try:
+            body = await self._get_json(f"/models/{mid}")
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                return ErrorEnvelope(
+                    error=ErrorDetail(
+                        code=ErrorCode.ENTITY_NOT_FOUND,
+                        message=f"No model '{mid}' in Cell Model Passports",
+                        recovery_hint="Resolve via /models/<source>/<source_id> (e.g. CCLE_ID, model_name).",
+                        invalid_input=mid,
+                    )
+                )
+            return ErrorEnvelope.upstream_error(e.response.status_code)
+        except Exception as e:
+            return self._unexpected(e, mid)
+        data = body.get("data")
+        if not data:
+            return ErrorEnvelope(
+                error=ErrorDetail(
+                    code=ErrorCode.ENTITY_NOT_FOUND,
+                    message=f"No model '{mid}'",
+                    recovery_hint="Check the SIDM id or resolve by source id.",
+                    invalid_input=mid,
+                )
+            )
+        return self._candidate(data if isinstance(data, dict) else data[0])
+
+    async def resolve_model(
+        self, source: str, source_id: str
+    ) -> DepMapModelCandidate | ErrorEnvelope:
+        """Strict: resolve a model by external identifier.
+
+        Source is case-insensitive, id is case-sensitive. Examples:
+        resolve_model("CCLE_ID", "769P_KIDNEY"), resolve_model("model_name", "NCI-H1581").
+        """
+        key = f"{source}/{source_id}"
+        try:
+            body = await self._get_json(f"/models/{source}/{source_id}")
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                return ErrorEnvelope(
+                    error=ErrorDetail(
+                        code=ErrorCode.ENTITY_NOT_FOUND,
+                        message=f"No model for {key}",
+                        recovery_hint="Check the identifier source and value (id is case-sensitive).",
+                        invalid_input=key,
+                    )
+                )
+            return ErrorEnvelope.upstream_error(e.response.status_code)
+        except Exception as e:
+            return self._unexpected(e, key)
+        data = body.get("data")
+        if not data:
+            return ErrorEnvelope(
+                error=ErrorDetail(
+                    code=ErrorCode.ENTITY_NOT_FOUND,
+                    message=f"No model for {key}",
+                    recovery_hint="Verify the identifier.",
+                    invalid_input=key,
+                )
+            )
+        return self._candidate(data if isinstance(data, dict) else data[0])
+
     async def search_models(
         self, query: str, *, limit: int = 10
     ) -> PaginationEnvelope[DepMapModelCandidate] | ErrorEnvelope:
-        """Fuzzy Phase 1: search cell-line models by name (Sanger Cell Model Passports)."""
+        """Fuzzy Phase 1: best-effort model search by name.
+
+        Cell Model Passports is filter/resolve-based, not full-text. This tries a JSONAPI name
+        filter; if you already know an identifier prefer resolve_model() (exact) or get_model()
+        (SIDM). The exact array-column filter operator should be confirmed against /swagger — on
+        failure this returns UPSTREAM_ERROR with that hint.
+        """
         if len(query) < 2:
             return ErrorEnvelope(
                 error=ErrorDetail(
                     code=ErrorCode.AMBIGUOUS_QUERY,
                     message="Query must be at least 2 characters",
-                    recovery_hint="Provide at least 2 characters for a model search",
+                    recovery_hint="Provide at least 2 characters",
                     invalid_input=query,
                 )
             )
+        flt = json.dumps([{"name": "names", "op": "any", "val": query}])
         try:
-            resp = await self._get(
-                "/models",
-                params={"filter[search]": query, "page[size]": limit},
-                headers={"Accept": "application/vnd.api+json"},
+            body = await self._get_json("/models", params={"filter": flt, "page[size]": limit})
+        except httpx.HTTPStatusError as e:
+            return ErrorEnvelope.upstream_error(
+                e.response.status_code,
+                detail="Confirm the /models names-filter operator against /swagger.",
             )
-            resp.raise_for_status()
-            body = resp.json()
-            items: list[DepMapModelCandidate] = []
-            for rec in body.get("data", [])[:limit]:
-                attr = rec.get("attributes", {})
-                items.append(
-                    DepMapModelCandidate(
-                        model_id=str(rec.get("id")),
-                        model_name=attr.get("names") or attr.get("model_name"),
-                        lineage=attr.get("tissue") or attr.get("cancer_type"),
-                        data_source="sanger_project_score",
-                    )
+        except Exception as e:
+            return self._unexpected(e, query)
+        recs = body.get("data") or []
+        items = [self._candidate(r) for r in recs[:limit]]
+        if not items:
+            return ErrorEnvelope(
+                error=ErrorDetail(
+                    code=ErrorCode.ENTITY_NOT_FOUND,
+                    message=f"No models matched '{query}'",
+                    recovery_hint="Try resolve_model('model_name', <exact name>) or an external id.",
+                    invalid_input=query,
                 )
-            if not items:
+            )
+        return PaginationEnvelope(
+            items=items,
+            pagination=Pagination(
+                cursor=None,
+                total_count=body.get("meta", {}).get("count", len(items)),
+                page_size=limit,
+            ),
+        )
+
+    async def models_with_mutation(
+        self, gene: str, mut_type: MutationType = "mutation", *, max_models: int = 500
+    ) -> PaginationEnvelope[DepMapModelCandidate] | ErrorEnvelope:
+        """Genotype resolution: the cohort of models carrying a <mut_type> mutation in <gene>.
+
+        Uses /models/by_<mut_type>/<gene>, following JSONAPI links.next up to max_models.
+        WARNING: mut_type="mutation" matches ANY variant (very broad — e.g. RB1 returns ~2185/2266
+        models), which is NOT the paper's damaging/homozygous call. Prefer a specific damaging type
+        (frameshift/deletion/splice_variant) or reconcile against the mutations dataset before using
+        these cohorts in a contrast. total_count is meta.count.
+        """
+        sym = gene.strip().upper()
+        items: list[DepMapModelCandidate] = []
+        total: int | None = None
+        path: str | None = f"/models/by_{mut_type}/{sym}"
+        params: dict[str, Any] | None = {"page[size]": min(max_models, 100)}
+        try:
+            while path and len(items) < max_models:
+                body = await self._get_json(path, params)
+                params = None  # links.next already carries the query string
+                if total is None:
+                    total = (body.get("meta") or {}).get("count")
+                for r in body.get("data") or []:
+                    items.append(self._candidate(r))
+                    if len(items) >= max_models:
+                        break
+                nxt = (body.get("links") or {}).get("next")
+                # next is an absolute URL; keep only the path+query so base_url (https) is used
+                path = nxt[nxt.find("/models"):] if nxt and "/models" in nxt else None
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
                 return ErrorEnvelope(
                     error=ErrorDetail(
                         code=ErrorCode.ENTITY_NOT_FOUND,
-                        message=f"No models found for '{query}'",
-                        recovery_hint="Try a different cell-line name or synonym",
-                        invalid_input=query,
+                        message=f"No '{mut_type}' cohort for gene '{sym}'",
+                        recovery_hint="Check the gene symbol and mut_type "
+                        "(mutation|frameshift|snp|insertion|deletion|splice_variant).",
+                        invalid_input=sym,
                     )
                 )
-            return PaginationEnvelope(
-                items=items,
-                pagination=Pagination(cursor=None, total_count=len(items), page_size=limit),
-            )
-        except httpx.HTTPStatusError as e:
             return ErrorEnvelope.upstream_error(e.response.status_code)
         except Exception as e:
-            return ErrorEnvelope(
-                error=ErrorDetail(
-                    code=ErrorCode.UPSTREAM_ERROR,
-                    message=f"Unexpected error: {e!r}",
-                    recovery_hint="Check network and the Sanger API status/endpoint path (see /swagger)",
-                    invalid_input=query,
-                )
-            )
+            return self._unexpected(e, sym)
+        return PaginationEnvelope(
+            items=items,
+            pagination=Pagination(cursor=None, total_count=total, page_size=len(items)),
+        )

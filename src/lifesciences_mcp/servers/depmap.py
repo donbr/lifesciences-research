@@ -4,7 +4,7 @@ Exposes the genotype-contrast capability (the S′-paper gap) plus a live Sanger
 Cell Model Passports search, following ADR-001 (Fuzzy-to-Fact) and ADR-004 (singleton).
 """
 
-from lifesciences_mcp.clients.depmap import DepMapClient
+from lifesciences_mcp.clients.depmap import DepMapClient, MutationType
 from lifesciences_mcp.models.depmap import (
     DataSource,
     DepMapModelCandidate,
@@ -42,6 +42,35 @@ async def search_models(
         PaginationEnvelope of model candidates (provenance = sanger_project_score), or ErrorEnvelope.
     """
     return await get_client().search_models(query, limit=limit)
+
+
+@mcp.tool()
+async def get_model(model_id: str) -> DepMapModelCandidate | ErrorEnvelope:
+    """Fetch one cancer cell-line model by Sanger id (Strict, e.g. "SIDM00748")."""
+    return await get_client().get_model(model_id)
+
+
+@mcp.tool()
+async def models_with_mutation(
+    gene: str, mut_type: MutationType = "mutation", max_models: int = 500
+) -> PaginationEnvelope[DepMapModelCandidate] | ErrorEnvelope:
+    """Resolve the cohort of models carrying a mutation in a gene (genotype resolution).
+
+    Uses Sanger /models/by_<mut_type>/<gene>.
+
+    Args:
+        gene: HGNC gene symbol (e.g. "RB1").
+        mut_type: mutation | frameshift | snp | insertion | deletion | splice_variant.
+        max_models: cap on models returned (paginates JSONAPI links.next).
+
+    Returns:
+        PaginationEnvelope of model candidates (sanger_project_score), or ErrorEnvelope.
+
+    Warning:
+        mut_type="mutation" matches ANY variant (very broad — not the paper's damaging call).
+        Prefer a specific damaging type or reconcile against the mutations dataset.
+    """
+    return await get_client().models_with_mutation(gene, mut_type, max_models=max_models)
 
 
 @mcp.tool()
