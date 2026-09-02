@@ -344,3 +344,6 @@ git switch -c implement/<id>-<description>
 **Trade-off:** Session scope is more efficient but means if an API goes down mid-test-run, subsequent tests won't skip. Module scope is a middle ground.
 
 **Reference:** PR #18 review comment suggested this optimization.
+
+## Recent Changes
+- 014-depmap-mcp-server: DepMap genotype-selective dependency server. Python 3.11+, FastMCP, async httpx, pydantic v2; no new third-party dependency.
