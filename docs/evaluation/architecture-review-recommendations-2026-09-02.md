@@ -8,7 +8,7 @@
 
 ## 1. Executive Summary
 
-1. **The "Agentic Biolink" schema was only partially adopted.** ADR-001 §4 has three mandates. One (flattened JSON) is met everywhere. One (`cross_references` per the Key Registry) is met by 4 of 13 servers and violated in shape, key set, or null handling by the rest. One (Biolink Model vocabulary, e.g. `biolink:treats`) was never implemented in any model, server, or test. "Agentic Biolink" in practice means "flat JSON plus a `cross_references` object". The name over-claims.
+1. **The Agentic Biolink schema was decided and consistently implemented** (corrected 2026-09-02; see `docs/adr/critique/adr-001-agentic-biolink-decision-record-2026-09-02.md`). Flat entity records, canonical CURIEs with a `cross_references` registry, and Cognitive Hooks are in every server; Biolink categories are carried by the registry keys, and `biolink:` node classes and predicates are used in the edge layer (competency-question graphs, graph-builder), per the node/edge split in `prior-art-api-patterns.md` §7.5. The one ADR-001 §4 sentence requiring `biolink:` terms as entity-record keys is an orphan from the v0.1 association-record example and should be deleted in v1.5. What this review did find is that the `cross_references` **values** are inconsistent across servers (see §2.2); that is a consistency problem, not a missing schema.
 2. **The omit-null guarantee does not hold on the wire.** `CrossReferences.model_dump()` is overridden with `exclude_none=True`, but FastMCP serializes return values through pydantic-core and bypasses that override. Calling `get_gene("HGNC:1100")` through `fastmcp.Client` against local code returns 15 `null` keys. Unit tests pass because they call `model_dump()` directly. The February 2026 compliance report marked HGNC Principle III as PASS because it read model definitions rather than tool output.
 3. **The existing review method audits definitions, not behavior.** The February playbook and its six reports are code-reading exercises. The Constitution's "Required Patterns" table promises `/analyze` validation and runtime regex validation, but Spec Kit's `analyze` never reads code and the regex table `CROSS_REF_PATTERNS` is defined and never used.
 4. **The Spec Kit install is two generations behind the official tooling.** Spec Kit now ships `/speckit.converge`, the official "audit code against spec, plan, tasks, and constitution" command, and installs Claude Code commands as skills under `.claude/skills/speckit-*/`. This repo has neither.
@@ -22,9 +22,9 @@
 
 | Mandate | Text in ADR-001 v1.4 | Status |
 |---|---|---|
-| Vocabulary | "Keys must use Biolink Model terms (e.g., `biolink:treats`)" | **Not adopted.** Zero occurrences of `biolink:` in `src/` or `tests/`. No `category` or `predicate` fields on any model. The only `biolink:` usage is in competency-question validation write-ups under `docs/`. |
+| Vocabulary | "Keys must use Biolink Model terms (e.g., `biolink:treats`)" | **Implemented in the edge layer, not in entity records.** `biolink:` node classes and predicates appear in the competency-question graphs and graph-builder outputs, which is where association records live. The sentence as written (predicates as keys of an entity record) is the orphaned v0.1 wording; see the decision record. |
 | Structure | "Flattened JSON (no deep TRAPI nesting)" | **Adopted.** All entity models are flat pydantic models; nesting is limited to `cross_references`, `pagination`, and small sub-objects (`revision`, `component_counts`, `protocol`). |
-| Cross-references | "Every entity response MUST include a `cross_references` object adhering to the Key Registry (Appendix A)" | **Partially adopted.** See 2.2. |
+| Cross-references | "Every entity response MUST include a `cross_references` object adhering to the Key Registry (Appendix A)" | **Adopted; values inconsistent across servers.** See 2.2 and AGE-687. |
 | Cognitive Hooks | "enriched with Cognitive Hooks to aid triangulation" | **Undefined.** The term appears in the standard prompt and ADR but is never defined in v1.4. The red-team critique reads it as aliases and location. HGNC, Entrez, and UniProt models carry aliases and locations ad hoc; nothing is normative. |
 
 ### 2.2 `cross_references` implementation by server
@@ -54,7 +54,7 @@ Two further inconsistencies affect ADR-001 §6 (Triangulation), which assumes an
 
 > **Corrected 2026-09-02, see `docs/adr/critique/adr-001-agentic-biolink-decision-record-2026-09-02.md`.** The decision was made and consistently implemented: Biolink alignment is at the category level in entity records (registry keys) and at the predicate level in the edge layer (competency graphs, graph-builder skill), per `prior-art-api-patterns.md` §7.5. The §4 "keys must use Biolink Model terms" sentence is a residue of the v0.1 association-record example and should be deleted, not implemented. The paragraph below is retained as originally written.
 
-The project adopted a **flat, cross-referenced JSON convention**, not a Biolink-aligned schema. That convention is internally inconsistent across servers and the one runtime guarantee it does promise (omit nulls) is broken on the wire for most servers. This is a documentation problem as much as a code problem: the ADR should either define the Biolink commitment precisely enough to test, or drop the Biolink claim and name what was actually built.
+The project adopted the Agentic Biolink schema it decided on. The `cross_references` values are internally inconsistent across servers and the one runtime guarantee it does promise (omit nulls) is broken on the wire for most servers. This is a documentation problem as much as a code problem: the ADR should either define the Biolink commitment precisely enough to test, or drop the Biolink claim and name what was actually built.
 
 ### 2.4 Caveat on evidence
 
