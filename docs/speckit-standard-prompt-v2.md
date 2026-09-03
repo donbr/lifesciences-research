@@ -412,6 +412,33 @@ Core Requirements:
 5. **Testing:** Include a `pytest-asyncio` test plan covering the 'Junior Dev' ambiguity cases. Rate limit: Conservative 1 req/sec."
 ```
 
+### DepMap (Genotype-Selective Dependencies)
+
+```text
+/speckit.specify "Build the DepMap MCP Server.
+
+Core Requirements:
+1. **Architecture:** Implement `DepMapClient` extending `LifeSciencesClient` using `httpx` and native `asyncio` (ADR-001 §2). Base URL: https://api.cellmodelpassports.sanger.ac.uk (Sanger Cell Model Passports, JSON:API v1.0). Public API, no key. NON-COMMERCIAL; third-party application use requires prior permission (depmap@sanger.ac.uk) - surface this in tool descriptions, not only docstrings.
+   - **Structure:** Must use `src/lifesciences_mcp/clients/depmap.py` (ADR-006).
+   - **Lifecycle:** Use module-level singleton pattern; `@mcp.on_event` is FORBIDDEN (ADR-004).
+   - **Rate limiting:** 1 req/sec via `asyncio.Lock` with exponential backoff. Cohort pagination is the real exposure (an RB1 deletion cohort is ~501 models across several sequential pages).
+2. **Protocol:** Implement the 'Fuzzy-to-Fact' workflow (ADR-001 §3):
+   - Tool 1: `search_models(query, slim, page_size)` (Fuzzy) returning ranked cell-model candidates with `SIDM:NNNNN` CURIEs.
+     CONSTRAINT: the upstream `names` filter accepts ONLY the `any` operator (every other operator returns HTTP 500) and matches EXACTLY and CASE-SENSITIVELY. Measured: `a549`, `MCF-7` and `hela` return zero hits; `HeLa` returns a hit and `HELA` does not. Upper-casing the query is NOT a fix. Build a LOCAL normalised alias index instead: one request to `/models?fields[model]=names&page[size]=2500` (2266 rows, ~250 KB, ~1.7 s), case-folded and punctuation-stripped, cached for the process lifetime.
+   - Tool 2: `get_model(model_id)` (Strict) accepting ONLY resolved CURIEs (`SIDM:NNNNN`; normalise the bare upstream `SIDM00903` form). Free text MUST return UNRESOLVED_ENTITY before any network call.
+   - Tool 3: `models_with_mutation(gene, mutation_type, slim, cursor, page_size)` (Strict) for genotype-cohort assembly.
+     CONSTRAINT: `mutation_type` is REQUIRED with NO default and MUST be validated against the closed set the API states in its own 404 body: frameshift, snp, insertion, deletion, splice_variant, mutation. The value `mutation` means ANY variant - it returns 2185 of 2266 models for RB1, which would put ~96% of the catalogue in the mutant arm and destroy the contrast. Echo the chosen class on every result.
+   - Tool 4: `get_dependency(gene_id, model_id, data_source)` (Strict) returning gene-effect, provenance-labelled.
+   - Tool 5: `genotype_contrast_by_gene(target_gene_id, genotype_gene_id, mutation_type, min_lines, data_source)` (Strict) returning WT-vs-mutant Δdependency, Mann-Whitney p, BH FDR, n per cohort, and direction. THE key capability.
+     CONSTRAINT (measured 2026-09-02, re-verify before trusting): Sanger CRISPR KO essentiality IS live-queryable - `/datasets/crispr_ko` holds 22,218,273 rows and `/models/<SIDM>/datasets/crispr_ko` returns 35,294 rows for A549, carrying `bf` (BAGEL Bayes factor), `bf_scaled`, `fc_clean_qn`, `mageck_fdr`, `qc_pass`, `source`, linked to gene (SIDG) and model (SIDM). What is NOT possible is filtering that route by gene: `gene_id`, `gene` and `gene.id` all return HTTP 400/500, so isolating one target gene means paging all 35,294 rows for a model (36 pages at page[size]=1000, ~5.6 s each). A 501-model cohort contrast is therefore ~3 hours of paging at the 1 req/sec limit. Broad Chronos gene-effect is genuinely absent (`/datasets/chronos`, `/datasets/gene_effect`, `/datasets/depmap` all 500). CONCLUSION: cohort-scale contrasts MUST read a checksum-pinned cached release - for COST, not availability - and return UPSTREAM_ERROR naming the missing release when none is configured, never a zero that reads as a measurement. A single-gene, single-model `get_dependency` against Sanger IS implementable live and should be, with per-model caching. Do NOT expose a tool that takes the per-model vectors as arguments: that requires an agent to serialise ~2000 entries per call. Keep the maths as an internal, unit-tested function.
+   - Gene arguments accept a resolved HGNC CURIE (`HGNC:NNNN`). Do NOT add a `search_genes` tool - gene resolution belongs to the HGNC and Entrez servers (cross-server Fuzzy-to-Fact); duplicating it here creates a second, divergent gene index. Bridge internally instead: `/genes?filter=[{"name":"symbol","op":"eq","val":"AURKB"}]` returns SIDG01983 carrying `hgnc_id: HGNC:11390`, so a Sanger SIDG id is reachable from an HGNC CURIE without a second public search tool.
+3. **Schema:** All outputs must use the 'Agentic Biolink' schema with `cross_references` (ADR-001 §4). Cell-line identifiers are not in the Appendix A registry, so use a feature-local cross-reference model (precedent: `DrugCrossReferences`, `EnsemblCrossReferences`) carrying `ccle` and `cosmic`, both confirmed resolvable via `/models/CCLE_ID/<id>` and `/models/cosmic_id/<id>`. NOTE: `model_name` is NOT a valid resolve source (404). Every record MUST carry `data_source ∈ {broad_24q2, sanger_project_score}` - the two are different screens and their numbers are not comparable.
+   - Null handling (ADR-001 §4): omit keys entirely. Use the `model_dump` override pattern; `ConfigDict(exclude_none=True)` is NOT a valid Pydantic v2 key and is SILENTLY IGNORED.
+4. **Envelopes:** Must use Canonical Pagination and Error envelopes (ADR-001 §8). `page_size` MUST be clamped (`max(1, min(100, page_size))`) and MUST report the REQUESTED size, not the item count. Propagate the upstream `links.next` as an opaque cursor - never truncate a cohort at a cap while presenting it as complete. An empty result set is an empty PaginationEnvelope, NOT an ENTITY_NOT_FOUND error. Error messages MUST name Cell Model Passports; `ErrorEnvelope.upstream_error()` hardcodes HGNC's name and MUST NOT be used here.
+   - Slim mode (ADR-001 §7): `slim=True` returns `id`, `name`, `score`. Candidates MUST carry a relevance `score` like every other SearchCandidate in the tree.
+5. **Testing:** Include a `pytest-asyncio` test plan covering the 'Junior Dev' ambiguity cases (mixed-case and punctuation-variant cell-line names; an unaccepted mutation_type; free text passed to a strict tool), the genotype-contrast maths against a frozen fixture (mutant-selective, WT-selective, exact tie → direction 'none', small-cohort n<min_lines → tested=False with the statistics OMITTED, NaN exclusion), provenance labelling, and cursor pagination reaching a second page. Acceptance: `genotype_contrast_by_gene('AURKB','RB1')` reproduces the RB1-mutant-selective AURKB / RB-E2F result from sprime-lung-repro on Broad 24Q2."
+```
+
 ## API Tier Reference
 
 Use this to prioritize which servers to build next:
@@ -424,6 +451,7 @@ Use this to prioritize which servers to build next:
 | 3 | **WikiPathways** 🔨, **Reactome** ⏭️, **KEGG** ⏭️, **OMIM** ⏭️, **Orphanet** ⚠️ | Pathways & Disease (HIGH PRIORITY) |
 | 4 | **Entrez** ✅, **Ensembl** ✅ | Genomics & Identifiers |
 | 5 | **ClinicalTrials.gov** 🔨 | Clinical/Translational Research |
+| 6 | **DepMap / Cell Model Passports** ✅ | Functional Genomics & Dependencies |
 
 **Legend:** ✅ Complete | 🔨 In Progress (AGE-128, AGE-129) | ⛔ Blocked (paid) | ❌ Out of Scope | ⏭️ Future | ⚠️ Unclear
 
@@ -453,3 +481,4 @@ Use this to prioritize which servers to build next:
 | 1.5.0 | 2026-01-03 | Added WikiPathways and ClinicalTrials.gov examples (AGE-128, AGE-129); created Tier 5 for Clinical/Translational; marked Tier 3 as HIGH PRIORITY |
 | 1.6.0 | 2026-01-09 | Added explicit ADR-004 and ADR-006 citations to template and preamble to strictly enforce architectural compliance |
 | 1.7.0 | 2026-01-09 | Added "Future Considerations" regarding robust error logging with `repr(e)` |
+| 1.8.0 | 2026-09-02 | Added DepMap (AGE-681) with measured live-API constraints injected; created Tier 6 (Functional Genomics) |
