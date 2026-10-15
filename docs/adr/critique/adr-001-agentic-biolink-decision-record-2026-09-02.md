@@ -54,7 +54,9 @@ Meanwhile the predicate vocabulary went where edges went. `docs/prior-art-api-pa
 | "Document TRAPI deviation in ADR-001 §10" | `validation-strategy-recommendations.md:92` (QW-3) | Never done; no §10 exists |
 | `biolink:` terms as keys of entity records | v1.1 through v1.4 §4 only | Not implemented, and not implementable as written |
 
-Two sources the ADR cites, "Technical Standards & Implementation Guide" and "Agentic Data Strategy", exist nowhere in the repository. Any intent older than master ADR v0.1 is lost. The research directory post-dates the schema by about five weeks, so the prior-art work justified the decision rather than producing it. That is fine; the decision is well justified. But it means v0.1 is the earliest surviving statement of intent and should be treated as such.
+The two sources master ADR v0.1 cites, "Technical Standards & Implementation Guide" and "Agentic Data Strategy", were missing from this repository when this record was written, and the paragraph here originally called any earlier intent lost. They survive in the predecessor repository `donbr/lifesciences-mcp` and are now copied, unchanged and with provenance, to `docs/adr/sources/`. Both date from 2025-12-21, the same day as v0.1, and cite the primary standards (Biolink Model documentation and paper, TRAPI, BioThings Explorer, Bioregistry). So the schema decision was grounded in prior art from the start; `docs/prior-art-research/`, added about three weeks later, extended that grounding rather than supplying it.
+
+This bears on §2. The vocabulary clause descends from more than the association-record example: Technical guide §7.1 makes Biolink "the mandated interoperability standard", and §7.2 requires every tool to re-map its output to the Biolink schema in TRAPI message form. v0.1 kept the vocabulary and rejected the TRAPI nesting. Removing the clause in v1.5 therefore narrows that original mandate, and v1.5 should record it as a decision, not as cleanup.
 
 ---
 
@@ -83,7 +85,7 @@ The canonical record of this decision is these seven files. Nothing here should 
 
 | # | File | Why it matters |
 |---|---|---|
-| 1 | `docs/adr/archive/master-adr-v0.1.md` | Only surviving statement of original intent; only enumeration of Cognitive Hooks; the association-record example that explains the vocabulary clause. |
+| 1 | `docs/adr/archive/master-adr-v0.1.md` | Earliest ADR statement of intent (its two source reports are in `docs/adr/sources/`); only enumeration of Cognitive Hooks; the association-record example that explains the vocabulary clause. |
 | 2 | `docs/adr/critique/adr-001-agentic-experience-critique.md` | Proved §4 and §6 contradicted each other and forced `cross_references` into the schema; this is why Agentic Biolink means what it means in practice. |
 | 3 | `docs/adr/critique/adr-001-v1.0-red-team-review.md` | Blocker 1 created the Key Registry, Blocker 4 created `slim=True`, and its "three developers, three implementations" test is the standard any v1.5 sentence must pass. |
 | 4 | `docs/adr/accepted/adr-001-v1.4.md` | Binding text. |
